@@ -1,0 +1,8 @@
+[mysql]
+url = "mysql://***REMOVED***/trading"
+
+[server]
+api_port = 3000
+
+[logging]
+log_dir = "logs"

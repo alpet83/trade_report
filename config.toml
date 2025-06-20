@@ -1,5 +1,5 @@
 [mysql]
-url = "mysql://***REMOVED***/trading"
+url = "mysql://username:password@host-ip/trading"
 
 [server]
 api_port = 3000

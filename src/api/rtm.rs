@@ -1,22 +1,18 @@
-// Modified: 2025-06-19 16:05:00 EEST
-// xaiArtifact: artifact_id="8175e37b-d181-43f5-b114-c752a846470a", artifact_version_id="5e6f7a8b-9c0d-1e2f-3a4b-5c6d7e8f9a0b"
-
 use axum::{Router, routing::get, Json, extract::Query, http::{Response, HeaderMap, StatusCode}};
 use serde_json::{Map, Value};
-use tokio::sync::RwLockReadGuard;
 use tokio::time::{timeout, Duration};
 use tracing::{info, error, debug};
 use backtrace::Backtrace;
 use serde::Deserialize;
 use chrono::{DateTime, Utc, Timelike};
 
-use crate::{
+use crate::{    
     entities::account::{TradingAccount, get_account_manager},
     services::deposit_basic_report::{DepositBasicReport, generate_deposit_report},
     services::{chart::ChartReportGenerator, equity_report::EquityReportGenerator},
     db::mysql::MySqlDataSource,
-    config::Config,
-    app_error::AppError,
+    config::Config,    
+    logs::app_error::AppError,
 };
 
 #[derive(Deserialize)]
@@ -35,8 +31,8 @@ pub struct DepositReportQuery {
 pub fn routes() -> Router {
     Router::new()
         .route("/accounts", get(get_accounts))
-        .route("/deposit_report", get(get_deposit_report))
-        .route("/equity_chart", get(get_equity_chart))
+    //   .route("/deposit_report", get(get_deposit_report))
+    //   .route("/equity_chart", get(get_equity_chart))
 }
 
 async fn get_accounts() -> Result<Json<Map<String, Value>>, AppError> {
@@ -170,7 +166,7 @@ async fn get_deposit_report(Query(params): Query<DepositReportQuery>) -> Result<
     }
 }
 
-async fn get_equity_chart(Query(params): Query<DepositReportQuery>) -> Result<Response, AppError> {
+async fn get_equity_chart(Query(params): Query<DepositReportQuery>) -> Result<axum::http::Response<String>, AppError> {
     info!("Starting equity chart request");
 
     debug!("Validating query parameters");
@@ -237,10 +233,10 @@ async fn get_equity_chart(Query(params): Query<DepositReportQuery>) -> Result<Re
         debug!("Chart generated successfully");
         let mut headers = HeaderMap::new();
         headers.insert("Content-Type", "image/svg+xml".parse().unwrap());
-        Ok(Response::builder()
+        Ok(axum::http::Response::builder()
             .status(StatusCode::OK)
             .header("Content-Type", "image/svg+xml")
-            .body(svg_data)
+            .body(String::from_utf8(svg_data).unwrap()) // Изменено: Vec<u8> -> String
             .unwrap())
     })
     .await;

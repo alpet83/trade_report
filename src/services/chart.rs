@@ -10,8 +10,10 @@ pub trait ChartReportGenerator {
         &self,
         account: &TradingAccount,
         start_ts: DateTime<Utc>,
-        end_ts: DateTime<Utc>,
+        end_ts: DateTime<Utc>,        
         value_column: Option<&str>,
+        dark: bool,
+        period_type: Option<&str>,
     ) -> impl Future<Output = Result<Vec<u8>, String>>;
 
     fn generate_image(
@@ -20,5 +22,7 @@ pub trait ChartReportGenerator {
         start_ts: DateTime<Utc>,
         end_ts: DateTime<Utc>,
         value_column: Option<&str>,
+        dark: bool,
+        period_type: Option<&str>,
     ) -> impl Future<Output = Result<Vec<u8>, String>>;
 }

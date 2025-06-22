@@ -1,7 +1,7 @@
 use chrono::{DateTime, Utc};
 use tracing::info;
 
-use crate::db::mysql::TradeDataSource;
+use crate::entities::trade_data::TradeDataSource;
 
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 pub struct Report {

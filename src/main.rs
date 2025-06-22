@@ -2,7 +2,8 @@ use axum::{Router, routing::get};
 use tokio::net::TcpListener;
 use tracing::{info, error, debug};
 use tracing_subscriber::EnvFilter;
-use trade_report::{api::{report, rtm}, config::Config, entities::account};
+use trade_report::{api::{report, rtm}, config::Config, entities::account, db::mysql::MySqlDataSource};
+
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -11,7 +12,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .with_env_filter(EnvFilter::from_default_env().add_directive("info".parse()?))
         .init();
 
-    info!("Starting Trade Report v0.1");
+    info!("Starting Trade Report v0.3.0");
 
     // Load configuration
     debug!("Loading configuration");
@@ -19,10 +20,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     
     // Initialize MySQL pool
     debug!("Initializing MySQL pool");
-    let pool = sqlx::MySqlPool::connect(&config.mysql.url)
+
+    let pool = MySqlDataSource::init_db_conn(&config.mysql.url)
         .await
         .map_err(|e| format!("Failed to connect to MySQL: {}", e))?;
-
+    
     // Initialize TradingAccountManager
     debug!("Creating TradingAccountManager");
     account::create_account_manager();
@@ -31,7 +33,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut guard = manager
         .write()
         .await;
-    guard.initialize(&pool)
+    guard.initialize()
         .await
         .map_err(|e| format!("Failed to initialize TradingAccountManager: {}", e))?;
     drop(guard);

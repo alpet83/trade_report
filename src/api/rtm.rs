@@ -1,40 +1,63 @@
+// /src/api/rtm.rs
+// Modified: 2025-06-22 10:53:00 EEST
+
 use axum::{Router, routing::get, Json, extract::Query, http::{Response, HeaderMap, StatusCode}};
 use serde_json::{Map, Value};
 use tokio::time::{timeout, Duration};
 use tracing::{info, error, debug};
 use backtrace::Backtrace;
-use serde::Deserialize;
-use chrono::{DateTime, Utc, Timelike};
+use serde::{Deserialize, Deserializer};
 
-use crate::{    
-    entities::account::{TradingAccount, get_account_manager},
+use crate::{
+    entities::account::{TradingAccount, get_account_manager, resolve_account},
     services::deposit_basic_report::{DepositBasicReport, generate_deposit_report},
     services::{chart::ChartReportGenerator, equity_report::EquityReportGenerator},
     db::mysql::MySqlDataSource,
-    config::Config,    
+    common::time::resolve_time_range,
+    config::Config,
     logs::app_error::AppError,
 };
 
+// Deserializes dark parameter from "1", "0", "true", or "false"
+fn deserialize_dark<'de, D>(deserializer: D) -> Result<Option<bool>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let s: Option<String> = Option::deserialize(deserializer)?;
+    match s.as_deref() {
+        Some("1") | Some("true") => Ok(Some(true)),
+        Some("0") | Some("false") => Ok(Some(false)),
+        Some(other) => Err(serde::de::Error::custom(format!("Invalid dark value: {}", other))),
+        None => Ok(None),
+    }
+}
+
+// Defines query parameters for deposit report and equity chart requests
 #[derive(Deserialize)]
 pub struct DepositReportQuery {
     exchange: Option<String>,
-    account_id: Option<String>,
+    account_id: Option<u32>,
     applicant: Option<String>,
     period: Option<i64>,
+    period_type: Option<String>, // Supports weekly period
     value_column: Option<String>,
     start_ts: Option<String>,
     end_ts: Option<String>,
     width: Option<u32>,
     height: Option<u32>,
+    #[serde(deserialize_with = "deserialize_dark")]
+    dark: Option<bool>, // Supports 1, 0, true, false
 }
 
-pub fn routes() -> Router {
+// Configures API routes for account and report endpoints
+pub fn routes() -> Router<()> {
     Router::new()
         .route("/accounts", get(get_accounts))
-    //   .route("/deposit_report", get(get_deposit_report))
-    //   .route("/equity_chart", get(get_equity_chart))
+        .route("/deposit_report", get(get_deposit_report))
+        .route("/equity_chart", get(get_equity_chart))
 }
 
+// Fetches list of trading accounts
 async fn get_accounts() -> Result<Json<Map<String, Value>>, AppError> {
     info!("Starting request to fetch trading accounts");
 
@@ -84,51 +107,20 @@ async fn get_accounts() -> Result<Json<Map<String, Value>>, AppError> {
     }
 }
 
+// Generates a deposit report based on query parameters
+#[axum::debug_handler]
 async fn get_deposit_report(Query(params): Query<DepositReportQuery>) -> Result<Json<DepositBasicReport>, AppError> {
     info!("Starting deposit report request");
 
     debug!("Validating query parameters");
-    let account = match (params.exchange, params.account_id, params.applicant) {
-        (Some(exchange), Some(account_id), None) => {
-            let manager = get_account_manager();
-            let guard = manager.read().await;
-            let acc = guard.get_account(&account_id)
-                .filter(|acc| acc.exchange.name.to_lowercase() == exchange.to_lowercase())
-                .ok_or_else(|| AppError::Internal(format!("No account found for account_id={} on exchange={}", account_id, exchange)))?;
-            acc.clone()
-        }
-        (None, None, Some(applicant)) => {
-            let manager = get_account_manager();
-            let guard = manager.read().await;
-            let acc = guard.find_account(&applicant)
-                .ok_or_else(|| AppError::Internal(format!("No account found for applicant: {}", applicant)))?;
-            acc.clone()
-        }
-        _ => return Err(AppError::Internal("Must provide either (exchange, account_id) or applicant".to_string())),
-    };
-
+    let account = resolve_account(
+        params.exchange,
+        params.account_id.map(|id| id.to_string()),
+        params.applicant,
+    ).await?;
     debug!("Selected account_id: {}, exchange: {}", account.account_id, account.exchange.name);
 
-    let end_ts = match params.end_ts {
-        Some(end) => DateTime::parse_from_rfc3339(&end)
-            .map(|dt| dt.with_timezone(&Utc))
-            .map_err(|e| AppError::Internal(format!("Invalid end_ts format: {}", e)))?,
-        None => Utc::now(),
-    };
-
-    let period = params.period.unwrap_or(24);
-    let start_ts = match params.start_ts {
-        Some(start) => DateTime::parse_from_rfc3339(&start)
-            .map(|dt| dt.with_timezone(&Utc))
-            .map_err(|e| AppError::Internal(format!("Invalid start_ts format: {}", e)))?,
-        None => (end_ts - chrono::Duration::hours(period))
-            .with_minute(0)
-            .expect("Invalid datetime")
-            .with_second(0)
-            .expect("Invalid datetime")
-            .with_nanosecond(0)
-            .expect("Invalid datetime"),
-    };
+    let (start_ts, end_ts) = resolve_time_range(params.start_ts, params.end_ts, params.period, params.period_type.clone()).await?;
 
     debug!("Using time range: start_ts={}, end_ts={}", start_ts, end_ts);
 
@@ -140,7 +132,7 @@ async fn get_deposit_report(Query(params): Query<DepositReportQuery>) -> Result<
             .map_err(|e| AppError::Internal(format!("Failed to connect to DB: {}", e)))?;
 
         debug!("Generating deposit report for account_id={} on {}", account.account_id, account.exchange.name);
-        let report = generate_deposit_report(&db, &account, start_ts, end_ts, params.value_column.as_deref())
+        let report = generate_deposit_report(&account, start_ts, end_ts, params.value_column.as_deref())
             .await
             .map_err(|e| AppError::Internal(format!("Failed to generate report: {}", e)))?;
 
@@ -166,56 +158,27 @@ async fn get_deposit_report(Query(params): Query<DepositReportQuery>) -> Result<
     }
 }
 
+// Generates an equity chart based on query parameters
+#[axum::debug_handler]
 async fn get_equity_chart(Query(params): Query<DepositReportQuery>) -> Result<axum::http::Response<String>, AppError> {
     info!("Starting equity chart request");
 
     debug!("Validating query parameters");
-    let account = match (params.exchange, params.account_id, params.applicant) {
-        (Some(exchange), Some(account_id), None) => {
-            let manager = get_account_manager();
-            let guard = manager.read().await;
-            let acc = guard.get_account(&account_id)
-                .filter(|acc| acc.exchange.name.to_lowercase() == exchange.to_lowercase())
-                .ok_or_else(|| AppError::Internal(format!("No account found for account_id={} on exchange={}", account_id, exchange)))?;
-            acc.clone()
-        }
-        (None, None, Some(applicant)) => {
-            let manager = get_account_manager();
-            let guard = manager.read().await;
-            let acc = guard.find_account(&applicant)
-                .ok_or_else(|| AppError::Internal(format!("No account found for applicant: {}", applicant)))?;
-            acc.clone()
-        }
-        _ => return Err(AppError::Internal("Must provide either (exchange, account_id) or applicant".to_string())),
-    };
-
+    let account = resolve_account(
+        params.exchange,
+        params.account_id.map(|id| id.to_string()),
+        params.applicant,
+    ).await?;
     debug!("Selected account_id: {}, exchange: {}", account.account_id, account.exchange.name);
 
-    let end_ts = match params.end_ts {
-        Some(end) => DateTime::parse_from_rfc3339(&end)
-            .map(|dt| dt.with_timezone(&Utc))
-            .map_err(|e| AppError::Internal(format!("Invalid end_ts format: {}", e)))?,
-        None => Utc::now(),
-    };
-
-    let period = params.period.unwrap_or(24);
-    let start_ts = match params.start_ts {
-        Some(start) => DateTime::parse_from_rfc3339(&start)
-            .map(|dt| dt.with_timezone(&Utc))
-            .map_err(|e| AppError::Internal(format!("Invalid start_ts format: {}", e)))?,
-        None => (end_ts - chrono::Duration::hours(period))
-            .with_minute(0)
-            .expect("Invalid datetime")
-            .with_second(0)
-            .expect("Invalid datetime")
-            .with_nanosecond(0)
-            .expect("Invalid datetime"),
-    };
+    let (start_ts, end_ts) = resolve_time_range(params.start_ts, params.end_ts, params.period, params.period_type.clone()).await?;
 
     let width = params.width.unwrap_or(800);
     let height = params.height.unwrap_or(600);
+    let dark = params.dark.unwrap_or(false); // Default to light theme
 
-    debug!("Using time range: start_ts={}, end_ts={}, width={}, height={}", start_ts, end_ts, width, height);
+    debug!("Using time range: start_ts={}, end_ts={}, width={}, height={}, dark={}, period_type={:?}", 
+        start_ts, end_ts, width, height, dark, params.period_type);
 
     let result = timeout(Duration::from_secs(60), async {
         debug!("Creating MySqlDataSource");
@@ -225,8 +188,8 @@ async fn get_equity_chart(Query(params): Query<DepositReportQuery>) -> Result<ax
             .map_err(|e| AppError::Internal(format!("Failed to connect to DB: {}", e)))?;
 
         debug!("Generating equity chart for account_id={} on {}", account.account_id, account.exchange.name);
-        let generator = EquityReportGenerator::new(&db, width, height);
-        let svg_data = generator.generate_svg(&account, start_ts, end_ts, params.value_column.as_deref())
+        let generator = EquityReportGenerator::new(width, height);
+        let svg_data = generator.generate_svg(&account, start_ts, end_ts, params.value_column.as_deref(), dark, params.period_type.as_deref())
             .await
             .map_err(|e| AppError::Internal(format!("Failed to generate chart: {}", e)))?;
 
@@ -236,7 +199,7 @@ async fn get_equity_chart(Query(params): Query<DepositReportQuery>) -> Result<ax
         Ok(axum::http::Response::builder()
             .status(StatusCode::OK)
             .header("Content-Type", "image/svg+xml")
-            .body(String::from_utf8(svg_data).unwrap()) // Изменено: Vec<u8> -> String
+            .body(String::from_utf8(svg_data).unwrap())
             .unwrap())
     })
     .await;
@@ -247,7 +210,7 @@ async fn get_equity_chart(Query(params): Query<DepositReportQuery>) -> Result<ax
             Ok(response)
         }
         Ok(Err(e)) => {
-            error!("Equity chart request failed: {:?}", e);
+            error!("Request failed: {:?}", e);
             Err(e)
         }
         Err(_) => {

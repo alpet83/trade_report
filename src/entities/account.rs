@@ -1,3 +1,6 @@
+// /src/entities/account.rs
+// Modified: 2025-06-21 13:30:00 EEST
+
 use std::sync::Arc;
 use serde::{Serialize, Deserialize};
 use std::collections::HashMap;
@@ -5,12 +8,47 @@ use once_cell::sync::OnceCell;
 use tokio::sync::RwLock;
 use tracing::{info, error, debug};
 
-use crate::{entities::{exchange::Exchange, account_data::{DepositHistoryRow, FundsHistoryRow}, trade::{Trade, Order}}, config::BotConfigMap};
+use crate::{
+    entities::{
+        exchange::Exchange,
+        account_data::{DepositHistoryRow, FundsHistoryRow},
+        trade::{Trade, Order}
+    },
+    db::mysql::MySqlDataSource,
+    config::BotConfigMap,
+    logs::app_error::AppError
+};
 use sqlx::MySqlPool;
+
+pub async fn resolve_account(
+    exchange: Option<String>,
+    account_id: Option<String>, // Оставлено как String для совместимости
+    applicant: Option<String>,
+) -> Result<TradingAccount, AppError> {
+    let manager = get_account_manager();
+    match (exchange, account_id, applicant) {
+        (Some(exchange), Some(account_id), None) => {
+            let account_id = account_id.parse::<u32>()
+                .map_err(|e| AppError::Internal(format!("Invalid account_id: {}", e)))?;
+            let guard = manager.read().await;
+            guard.get_account(&account_id)
+                .filter(|acc| acc.exchange.name.to_lowercase() == exchange.to_lowercase())
+                .ok_or_else(|| AppError::Internal(format!("No account found for account_id={} on exchange={}", account_id, exchange)))
+                .map(|acc| acc.clone())
+        }
+        (None, None, Some(applicant)) => {
+            let guard = manager.read().await;
+            guard.find_account(&applicant)
+                .ok_or_else(|| AppError::Internal(format!("No account found for applicant: {}", applicant)))
+                .map(|acc| acc.clone())
+        }
+        _ => Err(AppError::Internal("Must provide either (exchange, account_id) or applicant".to_string())),
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TradingAccount {
-    pub account_id: String,
+    pub account_id: u32, // Изменено с String на u32
     #[serde(rename = "applicant_name")]
     pub applicant: String,
     pub exchange: Arc<Exchange>,
@@ -27,7 +65,7 @@ pub struct TradingAccount {
 }
 
 impl TradingAccount {
-    pub fn new(account_id: String, applicant: String, exchange: Arc<Exchange>, monitor_enabled: bool) -> Self {
+    pub fn new(account_id: u32, applicant: String, exchange: Arc<Exchange>, monitor_enabled: bool) -> Self {
         Self {
             account_id,
             applicant,
@@ -43,7 +81,7 @@ impl TradingAccount {
 
 #[derive(Debug)]
 pub struct TradingAccountManager {
-    accounts: HashMap<String, TradingAccount>,
+    accounts: HashMap<u32, TradingAccount>, // Изменено с String на u32
 }
 
 impl TradingAccountManager {
@@ -53,11 +91,11 @@ impl TradingAccountManager {
         }
     }
 
-    pub async fn initialize(&mut self, pool: &MySqlPool) -> Result<(), String> {
+    pub async fn initialize(&mut self) -> Result<(), String> {
         info!("Starting initialization of TradingAccountManager");
-
         debug!("Loading BotConfigMap");
-        let config_map = BotConfigMap::load(pool)
+        let db = MySqlDataSource::db_conn();
+        let config_map = BotConfigMap::load(&db.pool)
             .await
             .map_err(|e| {
                 error!("Failed to load bot config map: {}", e);
@@ -67,13 +105,15 @@ impl TradingAccountManager {
         debug!("Processing {} bot configs", config_map.configs.len());
         for (applicant, bot_config) in config_map.configs {
             debug!("Creating account for applicant: {}", applicant);
+            let account_id = bot_config.account_id;
+            let exchange = Arc::new(Exchange::new(bot_config.exchange).await);
             let trading_account = TradingAccount::new(
-                bot_config.account_id.to_string(),
+                account_id,
                 applicant,
-                Arc::new(Exchange::new(bot_config.exchange)),
+                exchange,
                 bot_config.monitor_enabled,
             );
-            self.accounts.insert(trading_account.account_id.clone(), trading_account);
+            self.accounts.insert(trading_account.account_id, trading_account);
         }
 
         info!("Initialized {} trading accounts", self.accounts.len());
@@ -81,10 +121,10 @@ impl TradingAccountManager {
     }
 
     pub fn add_account(&mut self, account: TradingAccount) {
-        self.accounts.insert(account.account_id.clone(), account);
+        self.accounts.insert(account.account_id, account);
     }
 
-    pub fn get_account(&self, account_id: &str) -> Option<&TradingAccount> {
+    pub fn get_account(&self, account_id: &u32) -> Option<&TradingAccount> {
         self.accounts.get(account_id)
     }
 
@@ -115,7 +155,6 @@ pub fn get_account_manager() -> Arc<RwLock<TradingAccountManager>> {
         .clone()
 }
 
-// Custom serializer for monitor_enabled to output "1" or "0"
 fn serialize_bool_as_str<S>(value: &bool, serializer: S) -> Result<S::Ok, S::Error>
 where
     S: serde::Serializer,

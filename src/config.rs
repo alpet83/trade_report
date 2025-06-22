@@ -46,7 +46,7 @@ impl Config {
 
 #[derive(Debug)]
 pub struct BotConfig {
-    pub account_id: i32,
+    pub account_id: u32,
     pub exchange: String,
     pub monitor_enabled: bool,
 }
@@ -83,15 +83,16 @@ impl BotConfigMap {
                 })?;
 
             let mut config_map = HashMap::new();
-            let mut account_id = None;
+            let mut account_id: Option<u32> = None;
 
             for row in rows {
                 let param: String = row.get(1);
                 let value: String = row.get(2);
-                let current_account_id: i32 = row.get(0);
+                let sid: i32 = row.get(0);  // signed in DB table
+                let current_account_id: u32 = sid.try_into().unwrap();
 
                 if account_id.is_none() {
-                    account_id = Some(current_account_id);
+                    account_id = Some(current_account_id);                        ;
                 } else if account_id != Some(current_account_id) {
                     return Err(format!("Inconsistent account_id in {}", table_name));
                 }

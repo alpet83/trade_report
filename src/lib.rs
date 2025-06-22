@@ -1,3 +1,4 @@
+pub mod common;
 pub mod logs;
 pub mod entities; 
 pub mod services; 

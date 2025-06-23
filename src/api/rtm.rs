@@ -46,7 +46,7 @@ pub struct DepositReportQuery {
     width: Option<u32>,
     height: Option<u32>,
     #[serde(deserialize_with = "deserialize_dark")]
-    dark: Option<bool>, // Supports 1, 0, true, false
+    pub dark: Option<bool>, // Supports 1, 0, true, false
 }
 
 // Configures API routes for account and report endpoints

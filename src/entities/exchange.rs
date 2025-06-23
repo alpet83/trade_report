@@ -1,5 +1,5 @@
 // /src/entities/exchange.rs
-// Modified: 2025-06-22 11:45:00 EEST
+// Modified: 2025-06-23 15:30:00 EEST
 
 use serde::{Serialize, Deserialize};
 use std::sync::Arc;
@@ -10,7 +10,7 @@ use tracing::{info, error};
 
 use crate::{
     entities::public_data::Candle,
-    entities::cache::PriceCache,
+    entities::cache::{PriceCache, LoadPriceCacheTask},
     db::mysql::MySqlDataSource,
     common::consts::BTC_PAIR_ID,
 };
@@ -26,7 +26,7 @@ pub struct Exchange {
 }
 
 impl Exchange {
-    // Creates a new Exchange instance with the given name and prefetches BTC price cache
+    // Creates a new Exchange instance with the given name and schedules a task to prefetch BTC price cache
     pub async fn new(name: String) -> Self {
         let exchange = Exchange {
             name,
@@ -34,17 +34,13 @@ impl Exchange {
             price_caches: Arc::new(RwLock::new(HashMap::new())),
         };
 
-        // Prefetch BTC price cache for the past year
+        // Schedule a task to prefetch BTC price cache for the past year
         let cache = exchange.get_price_cache(Some(BTC_PAIR_ID)).await;
-        let db = MySqlDataSource::db_conn();
         let end_ts = Utc::now();
         let start_ts = end_ts - Duration::days(365);
-        if let Err(e) = cache.load_prefetch(start_ts, end_ts).await {
-            error!("Failed to prefetch BTC price cache for exchange {}: {}", exchange.name, e);
-        } else {
-            info!("Successfully prefetched BTC price cache for exchange {}", exchange.name);
-        }
+        let _task = LoadPriceCacheTask::new(cache, start_ts, end_ts, true).await;
 
+        info!("Initialized exchange {}", exchange.name);
         exchange
     }
 

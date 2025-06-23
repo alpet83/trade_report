@@ -4,7 +4,9 @@
 use chrono::{DateTime, Utc};
 use crate::entities::account::TradingAccount;
 use std::future::Future;
+use async_trait::async_trait;
 
+#[async_trait]
 pub trait ChartReportGenerator {
     fn generate_svg(
         &self,

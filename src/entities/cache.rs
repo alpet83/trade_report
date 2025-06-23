@@ -1,16 +1,19 @@
 // /src/entities/cache.rs
-// Modified: 2025-06-22 13:30:00 EEST
+// Modified: 2025-06-23 16:45:00 EEST
 
 use chrono::{DateTime, Utc, Duration};
 use dashmap::DashMap;
 use std::sync::Arc;
 use tracing::{info, debug, error};
+use async_trait::async_trait;
 
 use crate::{
     db::mysql::MySqlDataSource,
     entities::public_data::{Candle, PublicDataSource},
     entities::exchange::Exchange,
+    entities::task::{Task, Status, TaskBase},
     logs::app_error::AppError,
+    services::task_processor::TaskProcessor,
 };
 
 // Caches VWAP prices for an exchange and pair
@@ -24,6 +27,7 @@ pub struct PriceCache {
 impl PriceCache {
     // Creates a new PriceCache instance for an exchange and pair
     pub fn new(exchange: Arc<Exchange>, pair_id: Option<i32>) -> Self {
+        debug!("Creating new PriceCache for exchange={}, pair_id={:?}", exchange.name, pair_id);
         PriceCache {
             data: DashMap::new(),
             exchange,
@@ -48,7 +52,10 @@ impl PriceCache {
         // Load candles for the buffered period
         let candles = db.load_candles(prefetch_start, prefetch_end, &self.exchange.name, self.pair_id)
             .await
-            .map_err(|e| AppError::Internal(format!("Failed to fetch candles: {}", e)))?;
+            .map_err(|e| {
+                error!("Failed to fetch candles: {}", e);
+                AppError::Internal(format!("Failed to fetch candles: {}", e))
+            })?;
 
         if candles.is_empty() {
             error!("No candles found for {} in range {} to {}", self.exchange.name, prefetch_start, prefetch_end);
@@ -125,5 +132,111 @@ impl PriceCache {
                 Err(AppError::Internal(format!("No VWAP data available for timestamp {}", timestamp)))
             }
         }
+    }
+}
+
+// Task for loading price cache data in the background
+#[derive(Debug, Clone)]
+pub struct LoadPriceCacheTask {
+    base: TaskBase,
+    cache: Arc<PriceCache>,
+    start_ts: DateTime<Utc>,
+    end_ts: DateTime<Utc>,
+}
+
+#[async_trait]
+impl Task for LoadPriceCacheTask {
+    // Initializes the task
+    async fn init(&mut self) -> Result<(), String> {
+        debug!("Initializing LoadPriceCacheTask for exchange={}, pair_id={:?}", 
+            self.cache.exchange.name, self.cache.pair_id);
+        Ok(())
+    }
+
+    // Executes the task, loading price cache data
+    async fn run(&mut self) -> Result<Status, String> {
+        debug!("Running LoadPriceCacheTask for exchange={}, pair_id={:?}", 
+            self.cache.exchange.name, self.cache.pair_id);
+
+        match self.cache.load_prefetch(self.start_ts, self.end_ts).await {
+            Ok(()) => {
+                info!("Successfully loaded price cache for exchange={}, pair_id={:?}", 
+                    self.cache.exchange.name, self.cache.pair_id);
+                self.base.set_result(serde_json::Value::String("Loaded successfully".to_string()));
+                self.base.set_status(Status::Completed);
+                Ok(Status::Completed)
+            }
+            Err(e) => {
+                error!("Failed to load price cache: {}", e);
+                self.base.set_result(serde_json::Value::String(format!("Failed: {}", e)));
+                self.base.set_status(Status::Failed);
+                Ok(Status::Failed)
+            }
+        }
+    }
+
+    // Releases resources
+    async fn release(&mut self) -> Result<(), String> {
+        debug!("Releasing LoadPriceCacheTask for exchange={}, pair_id={:?}", 
+            self.cache.exchange.name, self.cache.pair_id);
+        Ok(())
+    }
+
+    // Delegates status to TaskBase
+    fn status(&self) -> Status {
+        self.base.status()
+    }
+
+    // Delegates set_status to TaskBase
+    fn set_status(&mut self, status: Status) {
+        self.base.set_status(status);
+    }
+
+    // Delegates result to TaskBase
+    fn result(&self) -> serde_json::Value {
+        self.base.result()
+    }
+
+    // Delegates set_result to TaskBase
+    fn set_result(&mut self, result: serde_json::Value) {
+        self.base.set_result(result);
+    }
+
+    // Delegates start_at to TaskBase
+    fn start_at(&self) -> DateTime<Utc> {
+        self.base.start_at()
+    }
+
+    // Delegates set_start_at to TaskBase
+    fn set_start_at(&mut self, start_at: DateTime<Utc>) {
+        self.base.set_start_at(start_at);
+    }
+}
+
+impl LoadPriceCacheTask {
+    // Creates a new LoadPriceCacheTask instance, optionally registering it in TaskProcessor
+    pub async fn new(
+        cache: Arc<PriceCache>,
+        start_ts: DateTime<Utc>,
+        end_ts: DateTime<Utc>,
+        auto_reg: bool,
+    ) -> Self {
+        debug!("Creating LoadPriceCacheTask for exchange={}, pair_id={:?}", cache.exchange.name, cache.pair_id);
+        let task = LoadPriceCacheTask {
+            base: TaskBase::new(),
+            cache: cache.clone(),
+            start_ts,
+            end_ts,
+        };
+        if auto_reg {
+            debug!("Auto-registering LoadPriceCacheTask");
+            if let Err(e) = task.base.self_reg(task.clone()).await {
+                error!("Failed to auto-register LoadPriceCacheTask: {}", e);
+            } else {
+                info!("Successfully auto-registered LoadPriceCacheTask for exchange={}, pair_id={:?}", 
+                    cache.exchange.name, cache.pair_id);
+            }
+        }
+        task
     }
 }

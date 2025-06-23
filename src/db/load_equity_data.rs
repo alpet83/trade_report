@@ -1,5 +1,5 @@
 // /src/db/load_equity_data.rs
-// Modified: 2025-06-22 08:53:00 EEST
+// Modified: 2025-06-22 14:15:00 EEST
 
 use chrono::{DateTime, Utc, Timelike};
 use async_trait::async_trait;
@@ -9,7 +9,7 @@ use crate::{
     entities::account_data::{FundsHistoryRow, DepositHistoryRow},    
     entities::public_data::PublicDataSource,
     entities::trade_data::TradeDataSource,
-    db::{mysql::{MySqlDataSource}},
+    db::mysql::MySqlDataSource,
     common::consts::BTC_PAIR_ID,
 };
 
@@ -38,9 +38,18 @@ impl LoadEquityData for MySqlDataSource {
         let account_id = account.account_id;            
         let exchange = &account.exchange.name;
 
-        let mut funds = self.get_funds_history(account, start_ts, end_ts)
-            .await
-            .map_err(|e| format!("Failed to fetch funds history: {}", e))?;
+        // Choose fetch method based on period duration
+        let period_hours = (end_ts - start_ts).num_hours();
+        let funds = if period_hours > 1500 {
+            self.get_funds_history_aggregated(account, start_ts, end_ts)
+                .await
+                .map_err(|e| format!("Failed to fetch aggregated funds history: {}", e))?
+        } else {
+            self.get_funds_history(account, start_ts, end_ts)
+                .await
+                .map_err(|e| format!("Failed to fetch funds history: {}", e))?
+        };
+        let mut funds = funds;
         funds.sort_by(|a, b| a.ts.cmp(&b.ts)); // Ensure chronological order
 
         let mut deposits = self.get_deposit_history(account, end_ts)
@@ -69,7 +78,7 @@ impl LoadEquityData for MySqlDataSource {
             // Process all funds points before or at the deposit time
             while fund_idx < funds.len() && funds[fund_idx].ts <= dep_ts {
                 let fund = &funds[fund_idx];
-                let btc_price = cache.get_vwap(self as &dyn PublicDataSource, fund.ts)
+                let btc_price = cache.get_vwap(fund.ts)
                     .await
                     .map_err(|e| format!("Failed to fetch BTC price: {}", e))?;
 

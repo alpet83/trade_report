@@ -1,5 +1,5 @@
 // /src/api/rtm.rs
-// Modified: 2025-06-22 10:53:00 EEST
+// Modified: 2025-06-22 13:30:00 EEST
 
 use axum::{Router, routing::get, Json, extract::Query, http::{Response, HeaderMap, StatusCode}};
 use serde_json::{Map, Value};
@@ -125,13 +125,7 @@ async fn get_deposit_report(Query(params): Query<DepositReportQuery>) -> Result<
     debug!("Using time range: start_ts={}, end_ts={}", start_ts, end_ts);
 
     let result = timeout(Duration::from_secs(60), async {
-        debug!("Creating MySqlDataSource");
-        let config = Config::load().map_err(|e| AppError::Internal(format!("Failed to load config: {}", e)))?;
-        let db = MySqlDataSource::new(&config.mysql.url)
-            .await
-            .map_err(|e| AppError::Internal(format!("Failed to connect to DB: {}", e)))?;
-
-        debug!("Generating deposit report for account_id={} on {}", account.account_id, account.exchange.name);
+        debug!("Using MySqlDataSource singleton");
         let report = generate_deposit_report(&account, start_ts, end_ts, params.value_column.as_deref())
             .await
             .map_err(|e| AppError::Internal(format!("Failed to generate report: {}", e)))?;
@@ -181,12 +175,6 @@ async fn get_equity_chart(Query(params): Query<DepositReportQuery>) -> Result<ax
         start_ts, end_ts, width, height, dark, params.period_type);
 
     let result = timeout(Duration::from_secs(60), async {
-        debug!("Creating MySqlDataSource");
-        let config = Config::load().map_err(|e| AppError::Internal(format!("Failed to load config: {}", e)))?;
-        let db = MySqlDataSource::new(&config.mysql.url)
-            .await
-            .map_err(|e| AppError::Internal(format!("Failed to connect to DB: {}", e)))?;
-
         debug!("Generating equity chart for account_id={} on {}", account.account_id, account.exchange.name);
         let generator = EquityReportGenerator::new(width, height);
         let svg_data = generator.generate_svg(&account, start_ts, end_ts, params.value_column.as_deref(), dark, params.period_type.as_deref())

@@ -1,20 +1,20 @@
 // /src/db/trade_data_source.rs
-// Modified: 2025-06-21 14:00:00 EEST
+// Modified: 2025-06-22 14:15:00 EEST
 
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
-use sqlx::{MySqlPool, Row};
+use sqlx::{MySql, Row};
 use tracing::{info, error, debug};
 
 use crate::{
     entities::{
-        trade::{Trade, Order, OrdersBatch, TradeSignal},
-        account_data::{DepositHistoryRow, FundsHistoryRow},
+        trade::{Trade, Order, TradeSignal},
+        account_data::{FundsHistoryRow, DepositHistoryRow},
         ticker::TickerInfo,
         position::PositionHistory,
         report::ReportConfig,
         account::TradingAccount,
-        trade_data::TradeDataSource, // <-- Import the trait from the correct module
+        trade_data::TradeDataSource,
     },
     db::{
         mysql::{MySqlDataSource, trading_table_name},
@@ -26,6 +26,7 @@ use crate::{
 
 #[async_trait]
 impl TradeDataSource for MySqlDataSource {
+    // Fetches trades for an account
     async fn get_trades(
         &self,
         start: DateTime<Utc>,
@@ -44,10 +45,10 @@ impl TradeDataSource for MySqlDataSource {
         let mut query_builder = sqlx::query_as::<_, Trade>(&query)
             .bind(start)
             .bind(end)
-            .bind(account.account_id as i32); // Приведение к i32
+            .bind(account.account_id as i32);
 
         if let Some(pid) = pair_id {
-            query_builder = query_builder.bind(pid as i32); // Приведение к i32
+            query_builder = query_builder.bind(pid as i32);
         }
 
         match query_builder.fetch_all(&self.pool).await {
@@ -61,7 +62,7 @@ impl TradeDataSource for MySqlDataSource {
         }
     }
 
-    // получение истории депозита с примерно ежеминутными записями двух балансов: USD и BTC
+    // Fetches funds history with USD and BTC balances
     async fn get_funds_history(
         &self,
         account: &TradingAccount,
@@ -92,6 +93,46 @@ impl TradeDataSource for MySqlDataSource {
         }
     }
 
+    // Fetches aggregated funds history with USD and BTC balances for large periods, grouped by 4-hour intervals
+    async fn get_funds_history_aggregated(
+        &self,
+        account: &TradingAccount,
+        start: DateTime<Utc>,
+        end: DateTime<Utc>,
+    ) -> Result<Vec<FundsHistoryRow>, String> {
+        let table = trading_table_name(&account.exchange.name, "funds_history");
+        let query = format!(
+            "SELECT 
+                FROM_UNIXTIME(FLOOR(UNIX_TIMESTAMP(ts) / (4 * 3600)) * (4 * 3600)) AS ts,
+                AVG(value) AS value,
+                AVG(value_btc) AS value_btc,
+                AVG(position_coef) AS position_coef
+            FROM {} 
+            WHERE ts >= ? AND ts <= ? AND account_id = ? 
+            GROUP BY FLOOR(UNIX_TIMESTAMP(ts) / (4 * 3600))
+            ORDER BY ts",
+            table
+        );
+
+        debug!("Executing aggregated query: {} with account_id={}, exchange={}, start_ts={}, end_ts={}", query, account.account_id, account.exchange.name, start, end);
+        match sqlx::query_as::<_, FundsHistoryRow>(&query)
+            .bind(start)
+            .bind(end)
+            .bind(account.account_id as i32)
+            .fetch_all(&self.pool)
+            .await
+        {
+            Ok(history) => {
+                info!("Fetched {} aggregated funds history records from {} for account_id={}", history.len(), table, account.account_id);
+                Ok(history)
+            }
+            Err(e) => {
+                Err(handle_sql_error(&query, e))
+            }
+        }
+    }
+
+    // Fetches orders for an account
     async fn get_orders(
         &self,
         start: DateTime<Utc>,
@@ -132,7 +173,7 @@ impl TradeDataSource for MySqlDataSource {
         }
     }
 
-    // получение истории пополнений и снятий средств на депозит, где одна запись - это либо пополнение, либо снятие
+    // Fetches deposit and withdrawal history
     async fn get_deposit_history(
         &self,
         account: &TradingAccount,        
@@ -161,6 +202,7 @@ impl TradeDataSource for MySqlDataSource {
         }
     }
 
+    // Fetches position history (not implemented)
     async fn get_position_history(
         &self,
         account: &TradingAccount,
@@ -171,6 +213,7 @@ impl TradeDataSource for MySqlDataSource {
         Err("Not implemented".to_string())
     }
 
+    // Fetches trade signals (not implemented)
     async fn get_trade_signals(
         &self,
         account: &TradingAccount,
@@ -180,6 +223,7 @@ impl TradeDataSource for MySqlDataSource {
         Err("Not implemented".to_string())
     }
 
+    // Fetches report configurations (not implemented)
     async fn get_report_configs(&self, exchange: &str) -> Result<Vec<ReportConfig>, String> {
         Err("Not implemented".to_string())
     }

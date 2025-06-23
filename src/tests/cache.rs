@@ -1,5 +1,5 @@
 // /src/tests/cache.rs
-// Modified: 2025-06-22 11:45:00 EEST
+// Modified: 2025-06-22 13:30:00 EEST
 
 use chrono::{DateTime, Utc, Duration};
 use std::sync::Arc;
@@ -95,14 +95,14 @@ async fn test_price_cache_load_prefetch_and_get_vwap() {
     assert!((vwap - expected_vwap).abs() < 0.001, "Expected VWAP ≈ {}, got {}", expected_vwap, vwap);
 
     // Test get_vwap
-    let vwap = cache.get_vwap(&MySqlDataSource::db_conn(), start_ts)
+    let vwap = cache.get_vwap(start_ts)
         .await
         .expect("Failed to get VWAP");
     assert!((vwap - expected_vwap).abs() < 0.001, "Expected VWAP ≈ {}, got {}", expected_vwap, vwap);
 
     // Test get_vwap with missing timestamp (fallback to last available)
     let missing_ts = end_ts + Duration::hours(2);
-    let vwap = cache.get_vwap(&MySqlDataSource::db_conn(), missing_ts)
+    let vwap = cache.get_vwap(missing_ts)
         .await
         .expect("Failed to get VWAP for missing timestamp");
     assert!((vwap - expected_vwap).abs() < 0.001, "Expected VWAP ≈ {}, got {}", expected_vwap, vwap);
@@ -114,17 +114,9 @@ async fn test_price_cache_load_prefetch_and_get_vwap() {
     MySqlDataSource::init_db_conn_with_mock(empty_db.clone()).await;
     let exchange = Arc::new(Exchange::new("bitmex".to_string()).await);
     let cache = exchange.get_price_cache(Some(1)).await;
-    let result = cache.get_vwap(&MySqlDataSource::db_conn(), start_ts).await;
+    let result = cache.get_vwap(start_ts).await;
     assert!(result.is_err(), "Expected error for empty candles");
     assert_eq!(result.unwrap_err().to_string(), "Internal error: No VWAP data available for timestamp ".to_string() + &start_ts.to_string());
 
     info!("Successfully tested PriceCache load_prefetch and get_vwap");
-}
-
-// Mock initialization for tests
-impl MySqlDataSource {
-    // Initializes the global MySqlDataSource singleton with a mock for testing
-    async fn init_db_conn_with_mock(db: Arc<MySqlDataSource>) {
-        DB_CONN.set(db).expect("Database connection already initialized");
-    }
 }

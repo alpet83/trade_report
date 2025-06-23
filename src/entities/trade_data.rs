@@ -27,6 +27,13 @@ pub trait TradeDataSource: Send + Sync + LoadEquityData {
         end: DateTime<Utc>,
     ) -> Result<Vec<FundsHistoryRow>, String>;
 
+    async fn get_funds_history_aggregated(
+        &self,
+        account: &TradingAccount,
+        start: DateTime<Utc>,
+        end: DateTime<Utc>,
+    ) -> Result<Vec<FundsHistoryRow>, String>;
+    
     async fn get_orders(
         &self,
         start: DateTime<Utc>,

@@ -1,5 +1,5 @@
 // /src/entities/cache.rs
-// Modified: 2025-06-22 09:45:00 EEST
+// Modified: 2025-06-22 13:30:00 EEST
 
 use chrono::{DateTime, Utc, Duration};
 use dashmap::DashMap;
@@ -33,7 +33,7 @@ impl PriceCache {
 
     // Prefetches VWAP prices for a time range with a one-day buffer
     pub async fn load_prefetch(
-        &self,        
+        &self,
         start: DateTime<Utc>,
         end: DateTime<Utc>,
     ) -> Result<(), AppError> {
@@ -83,10 +83,9 @@ impl PriceCache {
         Ok(())
     }
 
-    // Retrieves VWAP price for a timestamp, prefetching data if necessary
+    // Retrieves VWAP price for a timestamp, prefetching data or using the last available VWAP if necessary
     pub async fn get_vwap(
         &self,
-        db: &dyn PublicDataSource,
         timestamp: DateTime<Utc>,
     ) -> Result<f32, AppError> {
         let hour_timestamp = (timestamp.timestamp() / 3600) as i32;
@@ -100,14 +99,31 @@ impl PriceCache {
             .await
             .map_err(|e| AppError::Internal(format!("Failed to prefetch VWAP: {}", e)))?;
 
-        self.data.get(&hour_timestamp)
-            .map(|price| {
-                debug!("Retrieved VWAP={} for hour_timestamp={}", *price, hour_timestamp);
-                *price
-            })
-            .ok_or_else(|| {
-                error!("No VWAP data for hour_timestamp={} after prefetch", hour_timestamp);
-                AppError::Internal(format!("No VWAP data for timestamp {}", timestamp))
-            })
+        if let Some(price) = self.data.get(&hour_timestamp) {
+            debug!("Retrieved VWAP={} for hour_timestamp={}", *price, hour_timestamp);
+            return Ok(*price);
+        }
+
+        // Find the last available VWAP with a timestamp less than the requested
+        let mut last_vwap = None;
+        let mut max_timestamp = i32::MIN;
+        for entry in self.data.iter() {
+            let ts = *entry.key();
+            if ts < hour_timestamp && ts > max_timestamp {
+                max_timestamp = ts;
+                last_vwap = Some(*entry.value());
+            }
+        }
+
+        match last_vwap {
+            Some(price) => {
+                debug!("Using last available VWAP={} for hour_timestamp={}", price, max_timestamp);
+                Ok(price)
+            }
+            None => {
+                error!("No VWAP data available for timestamp {}", timestamp);
+                Err(AppError::Internal(format!("No VWAP data available for timestamp {}", timestamp)))
+            }
+        }
     }
 }

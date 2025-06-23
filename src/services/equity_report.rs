@@ -1,21 +1,18 @@
 // /src/services/equity_report.rs
-// Modified: 2025-06-22 10:53:00 EEST
+// Modified: 2025-06-22 13:45:00 EEST
 
-use chrono::{DateTime, Utc};
-use chrono::Timelike;
+use chrono::{DateTime, Utc, Timelike};
 use plotters::prelude::*;
 use tracing::{info, debug};
 
-use crate::entities::trade::Trade;
 use crate::{
-    db::mysql::MySqlDataSource,
-    db::load_equity_data::LoadEquityData,
     entities::account::TradingAccount,
-    entities::trade_data::TradeDataSource,
+    db::load_equity_data::LoadEquityData,    
+    db::mysql::MySqlDataSource,
     services::chart::ChartReportGenerator,
 };
 
-pub struct EquityReportGenerator {    
+pub struct EquityReportGenerator {
     width: u32,
     height: u32,
 }
@@ -43,7 +40,6 @@ impl ChartReportGenerator for EquityReportGenerator {
             account.account_id, account.exchange.name, value_column, dark, period_type);
 
         let db = MySqlDataSource::db_conn();
-
         let mut equity_points = db.load_equity_data(
             account,            
             start_ts,
@@ -125,6 +121,18 @@ impl ChartReportGenerator for EquityReportGenerator {
             let min_equity = equity_points.iter().map(|(_, v)| *v).fold(f32::INFINITY, f32::min);
             let max_equity = equity_points.iter().map(|(_, v)| *v).fold(f32::NEG_INFINITY, f32::max);
 
+            // Calculate period duration in hours
+            let period_hours = (max_ts - min_ts).num_hours();
+
+            // Choose time axis format based on period duration
+            let time_format = if period_hours <= 48 {
+                "%Y-%m-%d %H" // Up to 2 days: Y-m-d H
+            } else if period_hours <= 360 {
+                "%Y-%m-%d" // Up to 15 days: Y-m-d
+            } else {
+                "%Y-%m" // More than 15 days: Y-m
+            };
+
             let mut chart = ChartBuilder::on(&root)
                 .caption("Equity Chart", ("sans-serif", 20).into_font().color(&font_color))
                 .x_label_area_size(40)
@@ -139,6 +147,7 @@ impl ChartReportGenerator for EquityReportGenerator {
                 .y_labels(10)
                 .y_label_offset(5)
                 .y_label_formatter(&|v| format!("{:.2}", v))
+                .x_label_formatter(&|ts| ts.format(time_format).to_string())
                 .x_label_style(("sans-serif", 12).into_font().color(&font_color))
                 .y_label_style(("sans-serif", 12).into_font().color(&font_color))
                 .draw()
@@ -257,6 +266,18 @@ impl ChartReportGenerator for EquityReportGenerator {
             let min_equity = equity_points.iter().map(|(_, v)| *v).fold(f32::INFINITY, f32::min);
             let max_equity = equity_points.iter().map(|(_, v)| *v).fold(f32::NEG_INFINITY, f32::max);
 
+            // Calculate period duration in hours
+            let period_hours = (max_ts - min_ts).num_hours();
+
+            // Choose time axis format based on period duration
+            let time_format = if period_hours <= 48 {
+                "%Y-%m-%d %H" // Up to 2 days: Y-m-d H
+            } else if period_hours <= 360 {
+                "%Y-%m-%d" // Up to 15 days: Y-m-d
+            } else {
+                "%Y-%m" // More than 15 days: Y-m
+            };
+
             let mut chart = ChartBuilder::on(&root)
                 .caption("Equity Chart", ("sans-serif", 20).into_font().color(&font_color))
                 .x_label_area_size(40)
@@ -271,6 +292,7 @@ impl ChartReportGenerator for EquityReportGenerator {
                 .y_labels(10)
                 .y_label_offset(5)
                 .y_label_formatter(&|v| format!("{:.2}", v))
+                .x_label_formatter(&|ts| ts.format(time_format).to_string())
                 .x_label_style(("sans-serif", 12).into_font().color(&font_color))
                 .y_label_style(("sans-serif", 12).into_font().color(&font_color))
                 .draw()

@@ -1,5 +1,5 @@
 // /src/services/task_processor.rs
-// Modified: 2025-06-23 16:45:00 EEST
+// Modified: 2025-06-24 07:28:00 EEST
 
 use async_trait::async_trait;
 use chrono::{DateTime, Utc, Duration};
@@ -9,11 +9,15 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 use tokio::time::{sleep, Duration as TokioDuration};
 use tracing::{info, debug, error};
+use std::sync::atomic::{AtomicU32, Ordering};
 
 use crate::entities::task::{Task, Status};
 
 // Singleton instance for TaskProcessor
 static TASK_PROCESSOR: OnceCell<Arc<TaskProcessor>> = OnceCell::new();
+
+// Thread-safe task ID counter
+static TASK_ID_COUNTER: OnceCell<Arc<AtomicU32>> = OnceCell::new();
 
 // Manages a background thread for processing tasks
 #[derive(Debug)]
@@ -22,21 +26,6 @@ pub struct TaskProcessor {
     completed: DashMap<DateTime<Utc>, Arc<RwLock<Box<dyn Task>>>>,
     failed_count: Arc<RwLock<u32>>,
 }
-
-// Detailed logic of TaskProcessor operation
-// 1. Main thread adds tasks to the `scheduled` queue using `add`, which sets start_at to now + 50ms and calls `Task::init`.
-// 2. Background thread checks `scheduled` every 50ms, extracting tasks where `start_at <= now`.
-// 3. For each extracted task:
-//    - Calls `Task::run` to execute the task.
-//    - Based on the returned `Status`:
-//      - `Completed`: Moves task to `completed` queue with completion time as key.
-//      - `Failed`: Increments `failed_count`, calls `Task::release`, and discards the task.
-//      - `Postponed`: Returns task to `scheduled` queue with `start_at` as key.
-//      - `New` or `Scheduled`: Invalid states, logs error, increments `failed_count`, and discards task.
-// 4. Background thread cleans up `completed` queue, removing tasks older than 10 minutes with `release`.
-// 5. Methods `add`, `remove`, `replay_at` ensure thread-safe queue management.
-// 6. Tasks are wrapped in `Arc<RwLock<Box<dyn Task>>>` for thread safety.
-// 7. Method `print_status` logs the number of scheduled, completed, and failed tasks.
 
 impl TaskProcessor {
     // Creates a new TaskProcessor instance and starts the background thread
@@ -51,6 +40,11 @@ impl TaskProcessor {
         tokio::spawn(async move {
             processor_clone.run_background_thread().await;
         });
+
+        // Initialize task ID counter
+        TASK_ID_COUNTER
+            .set(Arc::new(AtomicU32::new(1)))
+            .expect("Task ID counter already initialized");
 
         info!("Initialized TaskProcessor singleton");
         processor
@@ -118,7 +112,9 @@ impl TaskProcessor {
                     }
                     Status::Postponed => {
                         let new_start_at = task.read().await.start_at();
-                        self.scheduled.insert(new_start_at, task.clone());
+                        self.replay_at(start_at, new_start_at, task.clone()).await.unwrap_or_else(|e| {
+                            error!("Failed to reschedule task: {}", e);
+                        });
                         info!("Task postponed, rescheduled at {}", new_start_at);
                     }
                     _ => {
@@ -164,14 +160,19 @@ impl TaskProcessor {
         task_write.init().await?;
         task_write.set_status(Status::Scheduled);
         let start_at = Utc::now() + Duration::milliseconds(50);
+        let task_id = TASK_ID_COUNTER
+            .get()
+            .expect("Task ID counter not initialized")
+            .fetch_add(1, Ordering::SeqCst);
+        task_write.set_id(task_id);
         task_write.set_start_at(start_at);
         drop(task_write);
         self.scheduled.insert(start_at, task_arc);
-        info!("Task scheduled at {}", start_at);
+        info!("Task {} scheduled at {}", task_id, start_at);
         Ok(())
     }
 
-    // Replays a task at a new start time (used internally by add)
+    // Replays a task at a new start time
     pub async fn replay_at(
         &self,
         old_start_at: DateTime<Utc>,
@@ -182,10 +183,17 @@ impl TaskProcessor {
         if old_start_at != new_start_at {
             self.scheduled.remove(&old_start_at);
         }
-        task.write().await.set_start_at(new_start_at);
-        task.write().await.set_status(Status::Scheduled);
+        let mut task_write = task.write().await;
+        task_write.set_start_at(new_start_at);
+        task_write.set_status(Status::Scheduled);
+        let task_id = TASK_ID_COUNTER
+            .get()
+            .expect("Task ID counter not initialized")
+            .fetch_add(1, Ordering::SeqCst);
+        task_write.set_id(task_id);
+        drop(task_write);
         self.scheduled.insert(new_start_at, task);
-        info!("Task scheduled at {}", new_start_at);
+        info!("Task {} scheduled at {}", task_id, new_start_at);
         Ok(())
     }
 
@@ -202,6 +210,17 @@ impl TaskProcessor {
         } else {
             Err(format!("Task not found with start_at={}", start_at))
         }
+    }
+
+    // Finds a completed task by ID
+    pub async fn find_completed(&self, id: u32) -> Option<Arc<RwLock<Box<dyn Task>>>> {
+        for entry in self.completed.iter() {
+            let task = entry.value();
+            if task.read().await.id() == id {
+                return Some(task.clone());
+            }
+        }
+        None
     }
 
     // Retrieves completed tasks for testing

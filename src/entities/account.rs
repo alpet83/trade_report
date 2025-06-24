@@ -1,5 +1,5 @@
 // /src/entities/account.rs
-// Modified: 2025-06-21 13:30:00 EEST
+// Modified: 2025-06-24 08:24:00 EEST
 
 use std::sync::Arc;
 use serde::{Serialize, Deserialize};
@@ -7,12 +7,14 @@ use std::collections::HashMap;
 use once_cell::sync::OnceCell;
 use tokio::sync::RwLock;
 use tracing::{info, error, debug};
+use dashmap::DashMap;
 
 use crate::{
     entities::{
         exchange::Exchange,
         account_data::{DepositHistoryRow, FundsHistoryRow},
-        trade::{Trade, Order}
+        trade::{Trade, Order},
+        cache::TradesCache,
     },
     db::mysql::MySqlDataSource,
     config::BotConfigMap,
@@ -22,7 +24,7 @@ use sqlx::MySqlPool;
 
 pub async fn resolve_account(
     exchange: Option<String>,
-    account_id: Option<String>, // Оставлено как String для совместимости
+    account_id: Option<String>,
     applicant: Option<String>,
 ) -> Result<TradingAccount, AppError> {
     let manager = get_account_manager();
@@ -48,7 +50,7 @@ pub async fn resolve_account(
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TradingAccount {
-    pub account_id: u32, // Изменено с String на u32
+    pub account_id: u32,
     #[serde(rename = "applicant_name")]
     pub applicant: String,
     pub exchange: Arc<Exchange>,
@@ -59,7 +61,7 @@ pub struct TradingAccount {
     #[serde(skip)]
     pub funds_history: HashMap<String, Vec<FundsHistoryRow>>,
     #[serde(skip)]
-    pub trades: HashMap<String, Vec<Trade>>,
+    pub trades_caches: Arc<DashMap<i32, Arc<TradesCache>>>,
     #[serde(skip)]
     pub orders: HashMap<String, Vec<Order>>,
 }
@@ -73,15 +75,22 @@ impl TradingAccount {
             monitor_enabled,
             deposit_history: HashMap::new(),
             funds_history: HashMap::new(),
-            trades: HashMap::new(),
+            trades_caches: Arc::new(DashMap::new()),
             orders: HashMap::new(),
         }
+    }
+
+    // Retrieves or creates a TradesCache for a given pair ID
+    pub async fn get_trades_cache(&self, pair_id: i32) -> Arc<TradesCache> {
+        self.trades_caches.entry(pair_id).or_insert_with(|| {
+            Arc::new(TradesCache::new(Arc::new(self.clone()), pair_id))
+        }).clone()
     }
 }
 
 #[derive(Debug)]
 pub struct TradingAccountManager {
-    accounts: HashMap<u32, TradingAccount>, // Изменено с String на u32
+    accounts: HashMap<u32, TradingAccount>,
 }
 
 impl TradingAccountManager {

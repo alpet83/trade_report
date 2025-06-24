@@ -1,5 +1,5 @@
 // /src/entities/task.rs
-// Modified: 2025-06-23 16:45:00 EEST
+// Modified: 2025-06-24 07:18:00 EEST
 
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
@@ -43,11 +43,16 @@ pub trait Task: Send + Sync + Debug {
     fn start_at(&self) -> DateTime<Utc>;
     // Sets the task's start time
     fn set_start_at(&mut self, start_at: DateTime<Utc>);
+    // Sets the task's ID
+    fn set_id(&mut self, id: u32);
+    // Returns the task's ID
+    fn id(&self) -> u32;
 }
 
 // Base structure for common task fields
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TaskBase {
+    id: u32,
     status: Status,
     result: Value,
     start_at: DateTime<Utc>,
@@ -57,6 +62,7 @@ impl TaskBase {
     // Creates a new TaskBase instance with start_at set to current time
     pub fn new() -> Self {
         TaskBase {
+            id: 0, // ID will be set in TaskProcessor::replay_at
             status: Status::New,
             result: Value::Null,
             start_at: Utc::now(),
@@ -91,6 +97,16 @@ impl TaskBase {
     // Sets the task's start time
     pub fn set_start_at(&mut self, start_at: DateTime<Utc>) {
         self.start_at = start_at;
+    }
+
+    // Returns the task's ID
+    pub fn id(&self) -> u32 {
+        self.id
+    }
+
+    // Sets the task's ID
+    pub fn set_id(&mut self, id: u32) {
+        self.id = id;
     }
 
     // Registers the task in the TaskProcessor

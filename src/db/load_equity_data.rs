@@ -9,6 +9,7 @@ use crate::{
     entities::account_data::{FundsHistoryRow, DepositHistoryRow},    
     entities::public_data::PublicDataSource,
     entities::trade_data::TradeDataSource,
+    entities::cache::PriceCache,
     db::mysql::MySqlDataSource,
     common::consts::BTC_PAIR_ID,
 };

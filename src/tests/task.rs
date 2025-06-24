@@ -1,11 +1,12 @@
 // /src/tests/task.rs
-// Modified: 2025-06-23 17:00:00 EEST
+// Modified: 2025-06-24 07:41:00 EEST
 
 use chrono::{DateTime, Utc};
 use serde_json::Value;
 use tokio::time::{sleep, Duration};
 use tracing::{info, debug};
 use tracing_subscriber::EnvFilter;
+use delegate::delegate;
 
 use crate::{
     entities::task::{Status, Task, TaskBase},
@@ -36,6 +37,19 @@ impl TestTask {
 
 #[async_trait::async_trait]
 impl Task for TestTask {
+    delegate! {
+        to self.base {
+            fn status(&self) -> Status;
+            fn set_status(&mut self, status: Status);
+            fn result(&self) -> serde_json::Value;
+            fn set_result(&mut self, result: serde_json::Value);
+            fn start_at(&self) -> DateTime<Utc>;
+            fn set_start_at(&mut self, start_at: DateTime<Utc>);
+            fn id(&self) -> u32;
+            fn set_id(&mut self, id: u32);
+        }
+    }
+
     // Initializes the task (no-op for test)
     async fn init(&mut self) -> Result<(), String> {
         debug!("Initializing TestTask");
@@ -45,8 +59,8 @@ impl Task for TestTask {
     // Executes the task, always returning Completed
     async fn run(&mut self) -> Result<Status, String> {
         debug!("Running TestTask");
-        self.base.set_result(Value::String("Completed successfully".to_string()));
-        self.base.set_status(Status::Completed);
+        self.set_result(Value::String("Completed successfully".to_string()));
+        self.set_status(Status::Completed);
         Ok(Status::Completed)
     }
 
@@ -54,36 +68,6 @@ impl Task for TestTask {
     async fn release(&mut self) -> Result<(), String> {
         debug!("Releasing TestTask");
         Ok(())
-    }
-
-    // Delegates status to TaskBase
-    fn status(&self) -> Status {
-        self.base.status()
-    }
-
-    // Delegates set_status to TaskBase
-    fn set_status(&mut self, status: Status) {
-        self.base.set_status(status);
-    }
-
-    // Delegates result to TaskBase
-    fn result(&self) -> Value {
-        self.base.result()
-    }
-
-    // Delegates set_result to TaskBase
-    fn set_result(&mut self, result: Value) {
-        self.base.set_result(result);
-    }
-
-    // Delegates start_at to TaskBase
-    fn start_at(&self) -> DateTime<Utc> {
-        self.base.start_at()
-    }
-
-    // Delegates set_start_at to TaskBase
-    fn set_start_at(&mut self, start_at: DateTime<Utc>) {
-        self.base.set_start_at(start_at);
     }
 }
 
@@ -114,18 +98,30 @@ async fn test_task_processor_add_and_run() {
     let completed_tasks = processor.get_completed_tasks();
     debug!("Completed tasks count: {}", completed_tasks.len());
     let mut task_found = false;
+    let mut task_id = 0;
     for (_, t) in completed_tasks.iter() {
         let t_read = t.read().await;
         let result = t_read.result() == Value::String("Completed successfully".to_string());
         let status = t_read.status() == Status::Completed;
-        debug!("Task in completed queue: result={:?}, status={:?}", t_read.result(), t_read.status());
+        debug!("Task in completed queue: id={}, result={:?}, status={:?}", t_read.id(), t_read.result(), t_read.status());
         if result && status {
+            task_id = t_read.id();
             task_found = true;
             break;
         }
     }
     assert!(task_found, "Expected task to be in completed queue with correct result and status");
     assert_eq!(completed_tasks.len(), 1, "Expected exactly one completed task");
+
+    // Check find_completed by ID
+    let found_task = processor.find_completed(task_id).await;
+    assert!(found_task.is_some(), "Expected to find task with id={}", task_id);
+    if let Some(t) = found_task {
+        let t_read = t.read().await;
+        assert_eq!(t_read.id(), task_id, "Expected task ID to match");
+        assert_eq!(t_read.result(), Value::String("Completed successfully".to_string()), "Expected task result to be 'Completed successfully'");
+        assert_eq!(t_read.status(), Status::Completed, "Expected task status to be Completed");
+    }
 
     info!("Successfully tested TaskProcessor with TestTask");
 }

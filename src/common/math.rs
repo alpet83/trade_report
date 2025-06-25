@@ -7,7 +7,7 @@ use std::cmp::max;
 /// - `value`: The value to round.
 /// - `extra_accuracy`: Additional decimal places to keep (default: 0).
 /// Returns the rounded value.
-pub fn auto_round(value: f64, extra_accuracy: i32) -> f64 {
+pub fn auto_round(value: f32, extra_accuracy: i32) -> f32 {
     if value == 0.0 {
         return 0.0;
     }
@@ -22,7 +22,7 @@ pub fn auto_round(value: f64, extra_accuracy: i32) -> f64 {
     let precision = base_precision + extra_accuracy;
 
     // Round to the calculated precision
-    let factor = 10.0_f64.powi(precision);
+    let factor = 10.0_f32.powi(precision);
     (value * factor).round() / factor
 }
 

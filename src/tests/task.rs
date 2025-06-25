@@ -9,7 +9,7 @@ use tracing_subscriber::EnvFilter;
 use delegate::delegate;
 
 use crate::{
-    entities::task::{Status, Task, TaskBase},
+    entities::task::{TaskStatus, Task, TaskBase},
     services::task_processor::TaskProcessor,
 };
 
@@ -39,8 +39,8 @@ impl TestTask {
 impl Task for TestTask {
     delegate! {
         to self.base {
-            fn status(&self) -> Status;
-            fn set_status(&mut self, status: Status);
+            fn status(&self) -> TaskStatus;
+            fn set_status(&mut self, status: TaskStatus);
             fn result(&self) -> serde_json::Value;
             fn set_result(&mut self, result: serde_json::Value);
             fn start_at(&self) -> DateTime<Utc>;
@@ -57,11 +57,11 @@ impl Task for TestTask {
     }
 
     // Executes the task, always returning Completed
-    async fn run(&mut self) -> Result<Status, String> {
+    async fn run(&mut self) -> Result<TaskStatus, String> {
         debug!("Running TestTask");
         self.set_result(Value::String("Completed successfully".to_string()));
-        self.set_status(Status::Completed);
-        Ok(Status::Completed)
+        self.set_status(TaskStatus::Completed);
+        Ok(TaskStatus::Completed)
     }
 
     // Releases resources (no-op for test)
@@ -102,7 +102,7 @@ async fn test_task_processor_add_and_run() {
     for (_, t) in completed_tasks.iter() {
         let t_read = t.read().await;
         let result = t_read.result() == Value::String("Completed successfully".to_string());
-        let status = t_read.status() == Status::Completed;
+        let status = t_read.status() == TaskStatus::Completed;
         debug!("Task in completed queue: id={}, result={:?}, status={:?}", t_read.id(), t_read.result(), t_read.status());
         if result && status {
             task_id = t_read.id();
@@ -120,7 +120,7 @@ async fn test_task_processor_add_and_run() {
         let t_read = t.read().await;
         assert_eq!(t_read.id(), task_id, "Expected task ID to match");
         assert_eq!(t_read.result(), Value::String("Completed successfully".to_string()), "Expected task result to be 'Completed successfully'");
-        assert_eq!(t_read.status(), Status::Completed, "Expected task status to be Completed");
+        assert_eq!(t_read.status(), TaskStatus::Completed, "Expected task status to be Completed");
     }
 
     info!("Successfully tested TaskProcessor with TestTask");

@@ -12,7 +12,7 @@ use crate::{
     db::mysql::MySqlDataSource,
     entities::public_data::{Candle, PublicDataSource},
     entities::cache::{PriceCache, LoadPriceCacheTask},
-    entities::task::{Task, Status, TaskBase},
+    entities::task::{Task, TaskStatus, TaskBase},
     entities::exchange::Exchange,
     logs::app_error::AppError,
     services::task_processor::TaskProcessor,
@@ -72,8 +72,7 @@ impl PriceCache {
         for (&hour_timestamp, &(total_price_volume, total_volume)) in &hourly_data {
             if total_volume > 0.0 {
                 let vwap = total_price_volume / total_volume;
-                self.data.insert(hour_timestamp, vwap);
-                debug!("Cached VWAP={} for hour_timestamp={}", vwap, hour_timestamp);
+                self.data.insert(hour_timestamp, vwap);                
             } else {
                 error!("Zero volume for hour_timestamp={}", hour_timestamp);
             }
@@ -133,8 +132,8 @@ impl PriceCache {
 impl Task for LoadPriceCacheTask {
     delegate! {
         to self.base {
-            fn status(&self) -> Status;
-            fn set_status(&mut self, status: Status);
+            fn status(&self) -> TaskStatus;
+            fn set_status(&mut self, status: TaskStatus);
             fn result(&self) -> serde_json::Value;
             fn set_result(&mut self, result: serde_json::Value);
             fn start_at(&self) -> DateTime<Utc>;
@@ -152,7 +151,7 @@ impl Task for LoadPriceCacheTask {
     }
 
     // Executes the task, loading price cache data
-    async fn run(&mut self) -> Result<Status, String> {
+    async fn run(&mut self) -> Result<TaskStatus, String> {
         debug!("Running LoadPriceCacheTask for exchange={}, pair_id={:?}", 
             self.cache.exchange.name, self.cache.pair_id);
 
@@ -161,14 +160,14 @@ impl Task for LoadPriceCacheTask {
                 info!("Successfully loaded price cache for exchange={}, pair_id={:?}", 
                     self.cache.exchange.name, self.cache.pair_id);
                 self.set_result(serde_json::Value::String("Loaded successfully".to_string()));
-                self.set_status(Status::Completed);
-                Ok(Status::Completed)
+                self.set_status(TaskStatus::Completed);
+                Ok(TaskStatus::Completed)
             }
             Err(e) => {
                 error!("Failed to load price cache: {}", e);
                 self.set_result(serde_json::Value::String(format!("Failed: {}", e)));
-                self.set_status(Status::Failed);
-                Ok(Status::Failed)
+                self.set_status(TaskStatus::Failed);
+                Ok(TaskStatus::Failed)
             }
         }
     }

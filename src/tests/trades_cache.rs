@@ -63,7 +63,7 @@ fn test_trades_cache_import_and_get() {
             price,
             amount,
             trade_no: trade_no.clone(),
-            order_id: "".to_string(),
+            order_id: 0,
             position: 0.0,
             rpnl: 0.0,
             flags: 0,

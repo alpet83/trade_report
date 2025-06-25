@@ -11,7 +11,7 @@ use tokio::time::{sleep, Duration as TokioDuration};
 use tracing::{info, debug, error};
 use std::sync::atomic::{AtomicU32, Ordering};
 
-use crate::entities::task::{Task, Status};
+use crate::entities::task::{Task, TaskStatus};
 
 // Singleton instance for TaskProcessor
 static TASK_PROCESSOR: OnceCell<Arc<TaskProcessor>> = OnceCell::new();
@@ -90,17 +90,17 @@ impl TaskProcessor {
                     Ok(status) => status,
                     Err(e) => {
                         error!("Task execution failed: {}", e);
-                        Status::Failed
+                        TaskStatus::Failed
                     }
                 };
 
                 match status {
-                    Status::Completed => {
+                    TaskStatus::Completed => {
                         let completion_time = Utc::now();
                         self.completed.insert(completion_time, task.clone());
                         info!("Task completed at {}, moved to completed queue", completion_time);
                     }
-                    Status::Failed => {
+                    TaskStatus::Failed => {
                         {
                             let mut failed_count = self.failed_count.write().await;
                             *failed_count += 1;
@@ -110,7 +110,7 @@ impl TaskProcessor {
                         }
                         info!("Task failed, released and discarded");
                     }
-                    Status::Postponed => {
+                    TaskStatus::Postponed => {
                         let new_start_at = task.read().await.start_at();
                         self.replay_at(start_at, new_start_at, task.clone()).await.unwrap_or_else(|e| {
                             error!("Failed to reschedule task: {}", e);
@@ -158,7 +158,7 @@ impl TaskProcessor {
         let task_arc = Arc::new(RwLock::new(task));
         let mut task_write = task_arc.write().await;
         task_write.init().await?;
-        task_write.set_status(Status::Scheduled);
+        task_write.set_status(TaskStatus::Scheduled);
         let start_at = Utc::now() + Duration::milliseconds(50);
         let task_id = TASK_ID_COUNTER
             .get()
@@ -185,7 +185,7 @@ impl TaskProcessor {
         }
         let mut task_write = task.write().await;
         task_write.set_start_at(new_start_at);
-        task_write.set_status(Status::Scheduled);
+        task_write.set_status(TaskStatus::Scheduled);
         let task_id = TASK_ID_COUNTER
             .get()
             .expect("Task ID counter not initialized")

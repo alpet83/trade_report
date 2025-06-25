@@ -1,19 +1,26 @@
 // /src/api/rtm.rs
-// Modified: 2025-06-22 13:30:00 EEST
+// Modified: 2025-06-25 09:21 EEST
 
 use axum::{Router, routing::get, Json, extract::Query, http::{Response, HeaderMap, StatusCode}};
+use axum::response::IntoResponse;
 use serde_json::{Map, Value};
 use tokio::time::{timeout, Duration};
 use tracing::{info, error, debug};
 use backtrace::Backtrace;
 use serde::{Deserialize, Deserializer};
+use chrono::{DateTime, Utc, Duration as ChronoDuration};
 
 use crate::{
     entities::account::{TradingAccount, get_account_manager, resolve_account},
+    entities::cache::TradesCache,
+    entities::trades_aggregator::{TradesAggregator, CalcMethod},
+    entities::trade::Trade,
+    entities::task::TaskStatus,
     services::deposit_basic_report::{DepositBasicReport, generate_deposit_report},
     services::{chart::ChartReportGenerator, equity_report::EquityReportGenerator},
     db::mysql::MySqlDataSource,
     common::time::resolve_time_range,
+    common::consts::BTC_PAIR_ID,
     config::Config,
     logs::app_error::AppError,
 };
@@ -32,7 +39,7 @@ where
     }
 }
 
-// Defines query parameters for deposit report and equity chart requests
+// Defines query parameters for deposit report, equity chart, and trades aggregation requests
 #[derive(Deserialize)]
 pub struct DepositReportQuery {
     exchange: Option<String>,
@@ -47,14 +54,18 @@ pub struct DepositReportQuery {
     height: Option<u32>,
     #[serde(deserialize_with = "deserialize_dark")]
     pub dark: Option<bool>, // Supports 1, 0, true, false
+    coarse_interval: Option<String>, // e.g., "1d", "7d", "30d", "90d", "365d"
+    precise_comb: Option<String>, // "1" for precise aggregation
+    week_align: Option<String>, // "1" or "true" for week-aligned aggregation
 }
 
-// Configures API routes for account and report endpoints
+// Configures API routes for account, report, and trades aggregation endpoints
 pub fn routes() -> Router<()> {
     Router::new()
         .route("/accounts", get(get_accounts))
         .route("/deposit_report", get(get_deposit_report))
         .route("/equity_chart", get(get_equity_chart))
+        .route("/trades_aggregated", get(get_trades_aggregated))
 }
 
 // Fetches list of trading accounts
@@ -199,6 +210,92 @@ async fn get_equity_chart(Query(params): Query<DepositReportQuery>) -> Result<ax
         }
         Ok(Err(e)) => {
             error!("Request failed: {:?}", e);
+            Err(e)
+        }
+        Err(_) => {
+            let backtrace = Backtrace::new();
+            error!("Request timed out after 60 seconds\nBacktrace:\n{:?}", backtrace);
+            Err(AppError::Internal(format!("Request timed out after 60 seconds\nBacktrace:\n{:?}", backtrace)))
+        }
+    }
+}
+
+// Generates aggregated trades based on query parameters
+#[axum::debug_handler]
+async fn get_trades_aggregated(Query(params): Query<DepositReportQuery>) -> Result<Json<Vec<Trade>>, AppError> {
+    info!("Starting aggregated trades request");
+
+    debug!("Validating query parameters");
+    let account = resolve_account(
+        params.exchange,
+        params.account_id.map(|id| id.to_string()),
+        params.applicant,
+    ).await?;
+    debug!("Selected account_id: {}, exchange: {}", account.account_id, account.exchange.name);
+
+    let (start_ts, end_ts) = resolve_time_range(params.start_ts, params.end_ts, params.period, params.period_type.clone()).await?;
+    debug!("Using time range: start_ts={}, end_ts={}", start_ts, end_ts);
+
+    let calc_method = if params.precise_comb.as_deref() == Some("1") {
+        CalcMethod::Precise
+    } else {
+        CalcMethod::Coarse
+    };
+
+    let interval = match params.coarse_interval.as_deref() {
+        Some("1d") => ChronoDuration::days(1),
+        Some("7d") => ChronoDuration::days(7),
+        Some("30d") => ChronoDuration::days(30),
+        Some("90d") => ChronoDuration::days(90),
+        Some("365d") => ChronoDuration::days(365),
+        _ => {
+            if calc_method == CalcMethod::Coarse {
+                return Err(AppError::BadRequest("coarse_interval must be specified for coarse aggregation (e.g., 1d, 7d, 30d, 90d, 365d)".to_string()));
+            }
+            ChronoDuration::days(1) // Default for precise mode, not used
+        }
+    };
+
+    let week_align = params.week_align.as_deref().map(|s| s == "1" || s.to_lowercase() == "true").unwrap_or(false);
+
+    
+    let result = timeout(Duration::from_secs(60), async {
+        debug!("Creating TradesCache for account_id={}, pair_id={}", account.account_id, BTC_PAIR_ID);
+        let trades_cache = account.get_trades_cache(BTC_PAIR_ID).await;
+
+        debug!("Creating TradesAggregator with calc_method={:?}, week_align={}", calc_method, week_align);
+        let mut aggregator = TradesAggregator::new(
+            trades_cache,
+            start_ts,
+            end_ts,
+            interval,
+            calc_method.clone(),
+            week_align,
+            false, // No auto-registration in API context
+        ).await;
+
+        debug!("Running aggregation");
+        if calc_method == CalcMethod::Coarse {
+            aggregator.aggregate_coarse().await
+                .map_err(|e| AppError::Internal(format!("Failed to aggregate trades: {}", e)))?;
+        } else {
+            aggregator.aggregate_precise().await
+                .map_err(|e| AppError::Internal(format!("Failed to aggregate trades: {}", e)))?;
+        }
+
+        let trades = aggregator.results;
+        debug!("Aggregation completed: {} virtual trades", trades.len());
+        Ok(Json(trades))
+    })
+    .await;
+
+    match result {
+        Ok(Ok(json)) => {
+            info!("Aggregated trades request completed: {} trades", json.0.len());
+            Ok(json)
+        }
+        Ok(Err(e)) => {
+            error!("Aggregated trades request failed: {:?}", e);
             Err(e)
         }
         Err(_) => {

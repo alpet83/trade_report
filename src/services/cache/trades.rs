@@ -1,5 +1,5 @@
 // /src/services/cache/trades.rs
-// Modified: 2025-06-24 12:53:00 EEST
+// Modified: 2025-06-24 15:51:00 EEST
 
 use chrono::{DateTime, Utc};
 use dashmap::DashMap;
@@ -18,7 +18,7 @@ use crate::{
 };
 
 impl TradesCache {
-    // Creates a new TradesCache instance for an account and pair
+    // Creates a new Trades liberals
     pub fn new(account: Arc<TradingAccount>, pair_id: i32) -> Self {
         debug!("Creating new TradesCache for account_id={}, pair_id={}", account.account_id, pair_id);
         TradesCache {
@@ -74,8 +74,12 @@ impl TradesCache {
                 return Err(AppError::Internal(format!("Invalid CSV record {}: expected 5 fields, got {}", i + 1, record.len())));
             }
 
-            // Parse timestamp in format "YYYY-MM-DDTHH:MM:SS.sss"
-            let ts_str = format!("{}+00:00", &record[0]); // Append UTC timezone
+            // Handle both Z and +00:00 timezone formats
+            let ts_str = if record[0].ends_with('Z') {
+                format!("{}+00:00", record[0].trim_end_matches('Z'))
+            } else {
+                record[0].to_string()
+            };
             let ts: DateTime<Utc> = DateTime::parse_from_str(&ts_str, "%Y-%m-%dT%H:%M:%S%.3f%z")
                 .map_err(|e| AppError::Internal(format!("Invalid timestamp in record {}: {}", i + 1, e)))?
                 .with_timezone(&Utc);
@@ -84,9 +88,9 @@ impl TradesCache {
                 "false" | "0" => false,
                 _ => return Err(AppError::Internal(format!("Invalid buy value in record {}: {}", i + 1, record[1].to_string()))),
             };
-            let price: f64 = record[2].parse()
+            let price: f32 = record[2].parse()
                 .map_err(|e| AppError::Internal(format!("Invalid price in record {}: {}", i + 1, e)))?;
-            let amount: f64 = record[3].parse()
+            let amount: f32 = record[3].parse()
                 .map_err(|e| AppError::Internal(format!("Invalid amount in record {}: {}", i + 1, e)))?;
             let trade_no = record[4].to_string();
 
@@ -97,7 +101,7 @@ impl TradesCache {
                 price,
                 amount,
                 trade_no,
-                order_id: "".to_string(),
+                order_id: 0,
                 position: 0.0,
                 rpnl: 0.0,
                 flags: 0,

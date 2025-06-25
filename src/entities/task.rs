@@ -14,7 +14,7 @@ use crate::services::task_processor::TaskProcessor;
 
 // Defines the status of a task
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub enum Status {
+pub enum TaskStatus {
     New,
     Postponed,
     Scheduled,
@@ -28,13 +28,13 @@ pub trait Task: Send + Sync + Debug {
     // Initializes the task, preparing it for execution
     async fn init(&mut self) -> Result<(), String>;
     // Executes the task, returning its status
-    async fn run(&mut self) -> Result<Status, String>;
+    async fn run(&mut self) -> Result<TaskStatus, String>;
     // Releases resources associated with the task
     async fn release(&mut self) -> Result<(), String>;
     // Returns the task's status
-    fn status(&self) -> Status;
+    fn status(&self) -> TaskStatus;
     // Sets the task's status
-    fn set_status(&mut self, status: Status);
+    fn set_status(&mut self, status: TaskStatus);
     // Returns the task's result
     fn result(&self) -> Value;
     // Sets the task's result
@@ -53,7 +53,7 @@ pub trait Task: Send + Sync + Debug {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TaskBase {
     id: u32,
-    status: Status,
+    status: TaskStatus,
     result: Value,
     start_at: DateTime<Utc>,
 }
@@ -63,19 +63,19 @@ impl TaskBase {
     pub fn new() -> Self {
         TaskBase {
             id: 0, // ID will be set in TaskProcessor::replay_at
-            status: Status::New,
+            status: TaskStatus::New,
             result: Value::Null,
             start_at: Utc::now(),
         }
     }
 
     // Returns the task's status
-    pub fn status(&self) -> Status {
+    pub fn status(&self) -> TaskStatus {
         self.status.clone()
     }
 
     // Sets the task's status
-    pub fn set_status(&mut self, status: Status) {
+    pub fn set_status(&mut self, status: TaskStatus) {
         self.status = status;
     }
 

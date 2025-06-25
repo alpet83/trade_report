@@ -7,14 +7,14 @@ pub struct Trade {
     pub ts: DateTime<Utc>,
     pub pair_id: i32,
     pub buy: bool,
-    pub price: f64,
-    pub amount: f64,
+    pub price: f32,
+    pub amount: f32,
     pub trade_no: String,
-    pub order_id: String,
-    pub position: f64,
-    pub rpnl: f64,
+    pub order_id: u32,
+    pub position: f32,
+    pub rpnl: f32,
     pub flags: i32,
-    pub comission: f64,
+    pub comission: f32,
 }
 
 #[derive(Serialize, Deserialize, FromRow, Debug, Clone)]

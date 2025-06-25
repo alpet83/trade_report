@@ -1,5 +1,5 @@
 // /src/entities/cache.rs
-// Modified: 2025-06-24 10:41:00 EEST
+// Modified: 2025-06-24 15:48:00 EEST
 
 use chrono::{DateTime, Utc};
 use dashmap::DashMap;
@@ -35,4 +35,18 @@ pub struct TradesCache {
     pub data: DashMap<i32, Vec<Trade>>,
     pub account: Arc<TradingAccount>,
     pub pair_id: i32,
+}
+
+impl Clone for TradesCache {
+    fn clone(&self) -> Self {
+        let data = DashMap::new();
+        for entry in self.data.iter() {
+            data.insert(*entry.key(), entry.value().clone());
+        }
+        TradesCache {
+            data,
+            account: Arc::clone(&self.account),
+            pair_id: self.pair_id,
+        }
+    }
 }

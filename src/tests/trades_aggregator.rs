@@ -1,35 +1,42 @@
 // /src/tests/trades_aggregator.rs
-// Modified: 2025-06-24 14:15:00 EEST
+// Modified: 2025-06-25 09:58 EEST
 
-use chrono::{DateTime, Utc, Duration};
+use async_trait::async_trait;
+use chrono::{DateTime, Utc, Duration, Datelike, Timelike, Weekday, Months};
+use serde_json::Value;
 use std::sync::Arc;
-use tracing::{debug, info};
+use tracing::{debug, error, info};
 use tracing_subscriber::EnvFilter;
+use axum::{http::{Request, StatusCode}, body::Body};
+use tower::ServiceExt;
+use axum::body::to_bytes; // Added
+use serde_json::json;
 
 use crate::{
     entities::trade::Trade,
     entities::cache::TradesCache,
+    entities::task::{Task, TaskStatus, TaskBase},
     entities::account::TradingAccount,
     entities::exchange::Exchange,
-    entities::trades_aggregator::{TradesAggregator, CalcMethod},
+    api::rtm,
+    common::math::auto_round,
     common::consts::BTC_PAIR_ID,
 };
 
-// Initializes tracing for test output
 fn init_tracing() {
     let _ = tracing_subscriber::fmt()
-        .with_env_filter(EnvFilter::from_default_env().add_directive("debug".parse().unwrap()))
+        .with_env_filter(EnvFilter::from_default_env().add_directive("info".parse().unwrap()))
         .try_init();
 }
 
-// Tests TradesAggregator with Coarse mode using sample_trades.csv
+// Тест для проверки эндпоинта /trades_aggregated
 #[tokio::test]
-async fn test_trades_aggregator_coarse() {
+async fn test_trades_aggregated_endpoint() {
     init_tracing();
 
     // Create test account
     let account = Arc::new(TradingAccount::new(
-        11223344,
+        1,
         "test".to_string(),
         Arc::new(Exchange {
             name: "bitmex".to_string(),
@@ -39,73 +46,91 @@ async fn test_trades_aggregator_coarse() {
         true,
     ));
 
-    // Create TradesCache
-    let cache = TradesCache::new(account, BTC_PAIR_ID);
+    // Create TradesCache and import sample_trades.csv
+    let cache = TradesCache::new(account.clone(), BTC_PAIR_ID);
+    cache.import_csv("sample_trades.csv".to_string())
+        .expect("Failed to import sample_trades.csv");
 
-    // Import trades from sample_trades.csv
-    cache.import_csv("sample_trades.csv".to_string()).expect("Failed to import CSV");
+    // Load expected results
+    let expected_results: Value = serde_json::from_str(
+        &std::fs::read_to_string("expected_results.json").expect("Failed to read expected_results.json")
+    ).expect("Failed to parse expected_results.json");
 
-    // Create TradesAggregator
-    let start_ts = DateTime::parse_from_rfc3339("2025-06-24T00:00:00Z")
-        .unwrap()
-        .with_timezone(&Utc);
-    let end_ts = DateTime::parse_from_rfc3339("2025-06-26T00:00:00Z")
-        .unwrap()
-        .with_timezone(&Utc);
-    let mut aggregator = TradesAggregator::new(
-        Arc::new(cache),
-        start_ts,
-        end_ts,
-        Duration::days(1),
-        CalcMethod::Coarse,
-        false,
-    )
-    .await;
+    // Create test router
+    let app = rtm::routes();
 
-    // Run aggregation
-    aggregator.aggregate_coarse().await.expect("Aggregation failed");
+    // Test 1: Coarse aggregation with 7d interval, week_align=true
+    let query = format!(
+        "/trades_aggregated?account_id=1&exchange=bitmex&start_ts=2024-12-01T00:00:00Z&end_ts=2025-01-28T00:00:00Z&coarse_interval=7d&week_align=1"
+    );
+    let request = Request::builder()
+        .method("GET")
+        .uri(query)
+        .body(Body::empty())
+        .unwrap();
+    let response = app.clone().oneshot(request).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK, "Expected OK status for coarse aggregation");
 
-    // Debug output of results
-    for trade in &aggregator.results {
-        debug!("#DBG: Virtual trade: date={}, buy={}, price={}, amount={}, flags={}, trade_no={}", 
-            trade.ts.date_naive(), trade.buy, trade.price, trade.amount, trade.flags, trade.trade_no);
+    let body_bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let trades: Vec<Trade> = serde_json::from_slice(&body_bytes).expect("Failed to parse response");
+    let expected_trades = expected_results["weekly"].as_array().expect("Expected weekly results array");
+    assert_eq!(trades.len(), expected_trades.len(), "Unexpected number of trades for weekly aggregation");
+    for (i, trade) in trades.iter().enumerate() {
+        let expected = &expected_trades[i];
+        assert_eq!(
+            trade.ts.to_rfc3339(),
+            expected["timestamp"].as_str().unwrap(),
+            "Timestamp mismatch for trade {}",
+            trade.trade_no
+        );
+        assert_eq!(
+            trade.buy,
+            expected["buy"].as_bool().unwrap(),
+            "Buy mismatch for trade {}",
+            trade.trade_no
+        );
+        assert_eq!(
+            trade.price,
+            expected["price"].as_f64().unwrap() as f32,
+            "Price mismatch for trade {}",
+            trade.trade_no
+        );
+        assert_eq!(
+            trade.amount,
+            expected["amount"].as_f64().unwrap() as f32,
+            "Amount mismatch for trade {}",
+            trade.trade_no
+        );
+        assert_eq!(
+            trade.trade_no,
+            expected["trade_no"].as_str().unwrap(),
+            "Trade_no mismatch for trade {}",
+            trade.trade_no
+        );
     }
+    info!("Successfully tested /trades_aggregated with coarse_interval=7d");
 
-    // Verify results
-    let results = &aggregator.results;
-    assert_eq!(results.len(), 4, "Expected 4 virtual trades (2 buys, 2 sells)");
+    // Test 2: Precise aggregation with precise_comb=1
+    let query = format!(
+        "/trades_aggregated?account_id=1&exchange=bitmex&start_ts=2024-12-01T00:00:00Z&end_ts=2025-01-28T00:00:00Z&precise_comb=1"
+    );
+    let request = Request::builder()
+        .method("GET")
+        .uri(query)
+        .body(Body::empty())
+        .unwrap();
+    let response = app.oneshot(request).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK, "Expected OK status for precise aggregation");
 
-    // Expected results for 2025-06-24
-    let buy_24 = results.iter().find(|t| t.ts.date_naive() == chrono::NaiveDate::from_ymd_opt(2025, 6, 24).unwrap() && t.buy);
-    let sell_24 = results.iter().find(|t| t.ts.date_naive() == chrono::NaiveDate::from_ymd_opt(2025, 6, 24).unwrap() && !t.buy);
-    assert!(buy_24.is_some(), "Expected buy trade for 2025-06-24");
-    assert!(sell_24.is_some(), "Expected sell trade for 2025-06-24");
-    let buy_24 = buy_24.unwrap();
-    let sell_24 = sell_24.unwrap();
-    assert_eq!(buy_24.flags, 4, "Expected 4 source trades for buy on 2025-06-24");
-    assert_eq!(sell_24.flags, 3, "Expected 3 source trades for sell on 2025-06-24");
-    assert_eq!(buy_24.trade_no, "buy_1:buy_4", "Incorrect trade_no for buy on 2025-06-24");
-    assert_eq!(sell_24.trade_no, "sell_1:sell_3", "Incorrect trade_no for sell on 2025-06-24");
-    assert!((buy_24.amount - 24111.2).abs() < 0.001, "Incorrect buy volume for 2025-06-24: {}", buy_24.amount);
-    assert!((buy_24.price - 86293.9).abs() < 0.001, "Incorrect buy price for 2025-06-24: {}", buy_24.price);
-    assert!((sell_24.amount - 20038.4).abs() < 0.001, "Incorrect sell volume for 2025-06-24: {}", sell_24.amount);
-    assert!((sell_24.price - 10382.2).abs() < 0.001, "Incorrect sell price for 2025-06-24: {}", sell_24.price);
-
-    // Expected results for 2025-06-25
-    let buy_25 = results.iter().find(|t| t.ts.date_naive() == chrono::NaiveDate::from_ymd_opt(2025, 6, 25).unwrap() && t.buy);
-    let sell_25 = results.iter().find(|t| t.ts.date_naive() == chrono::NaiveDate::from_ymd_opt(2025, 6, 25).unwrap() && !t.buy);
-    assert!(buy_25.is_some(), "Expected buy trade for 2025-06-25");
-    assert!(sell_25.is_some(), "Expected sell trade for 2025-06-25");
-    let buy_25 = buy_25.unwrap();
-    let sell_25 = sell_25.unwrap();
-    assert_eq!(buy_25.flags, 1, "Expected 1 source trade for buy on 2025-06-25");
-    assert_eq!(sell_25.flags, 2, "Expected 2 source trades for sell on 2025-06-25");
-    assert_eq!(buy_25.trade_no, "buy_5", "Incorrect trade_no for buy on 2025-06-25");
-    assert_eq!(sell_25.trade_no, "sell_4:sell_5", "Incorrect trade_no for sell on 2025-06-25");
-    assert!((buy_25.amount - 1268.9).abs() < 0.001, "Incorrect buy volume for 2025-06-25: {}", buy_25.amount);
-    assert!((buy_25.price - 38664.2).abs() < 0.001, "Incorrect buy price for 2025-06-25: {}", buy_25.price);
-    assert!((sell_25.amount - 8492.6).abs() < 0.001, "Incorrect sell volume for 2025-06-25: {}", sell_25.amount);
-    assert!((sell_25.price - 67466.7).abs() < 0.001, "Incorrect sell price for 2025-06-25: {}", sell_25.price);
-
-    info!("#INFO: Successfully tested TradesAggregator in Coarse mode");
+    let body_bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let trades: Vec<Trade> = serde_json::from_slice(&body_bytes).expect("Failed to parse response");
+    assert!(!trades.is_empty(), "Expected non-empty trades for precise aggregation");
+    let mut last_buy = None;
+    for trade in &trades {
+        if let Some(buy) = last_buy {
+            assert_ne!(buy, trade.buy, "Expected alternating buy/sell in precise aggregation");
+        }
+        last_buy = Some(trade.buy);
+    }
+    info!("Successfully tested /trades_aggregated with precise_comb=1");
 }

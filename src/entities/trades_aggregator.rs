@@ -1,8 +1,8 @@
 // /src/entities/trades_aggregator.rs
-// Modified: 2025-06-24 14:00:00 EEST
+// Modified: 2025-06-24 14:55:00 EEST
 
 use async_trait::async_trait;
-use chrono::{DateTime, Utc, Duration, Timelike};
+use chrono::{DateTime, Utc, Duration, Datelike, Timelike, Weekday, Months};
 use serde_json::Value;
 use std::sync::Arc;
 use tracing::{debug, error, info};
@@ -11,13 +11,13 @@ use delegate::delegate;
 use crate::{
     entities::trade::Trade,
     entities::cache::TradesCache,
-    entities::task::{Task, Status, TaskBase},
+    entities::task::{Task, TaskStatus, TaskBase},
     logs::app_error::AppError,
     common::math::auto_round,
 };
 
 // Defines aggregation method for trades
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum CalcMethod {
     Coarse,
     Precise,
@@ -32,6 +32,7 @@ pub struct TradesAggregator {
     pub end_ts: DateTime<Utc>,
     pub interval: Duration,
     pub calc_method: CalcMethod,
+    pub week_align: bool, // Align intervals to weeks (Monday to Sunday)
     pub results: Vec<Trade>,
 }
 
@@ -44,6 +45,7 @@ impl Clone for TradesAggregator {
             end_ts: self.end_ts,
             interval: self.interval,
             calc_method: self.calc_method.clone(),
+            week_align: self.week_align,
             results: self.results.clone(),
         }
     }
@@ -57,10 +59,11 @@ impl TradesAggregator {
         end_ts: DateTime<Utc>,
         interval: Duration,
         calc_method: CalcMethod,
+        week_align: bool,
         auto_reg: bool,
     ) -> Self {
-        debug!("#DBG: Creating TradesAggregator for pair_id={}, calc_method={:?}", 
-            trades_cache.pair_id, calc_method);
+        debug!("#DBG: Creating TradesAggregator for pair_id={}, calc_method={:?}, week_align={}", 
+            trades_cache.pair_id, calc_method, week_align);
         let task = TradesAggregator {
             base: TaskBase::new(),
             trades_cache,
@@ -68,6 +71,7 @@ impl TradesAggregator {
             end_ts,
             interval,
             calc_method,
+            week_align,
             results: Vec::new(),
         };
         if auto_reg {
@@ -87,8 +91,8 @@ impl TradesAggregator {
         if trades.is_empty() {
             return None;
         }
-        let total_amount: f64 = trades.iter().map(|t| t.amount).sum();
-        let total_price_volume: f64 = trades.iter().map(|t| t.price * t.amount).sum();
+        let total_amount: f32 = trades.iter().map(|t| t.amount).sum();
+        let total_price_volume: f32 = trades.iter().map(|t| t.price * t.amount).sum();
         let avg_price = if total_amount > 0.0 { 
             total_price_volume / total_amount
         } else { 
@@ -122,7 +126,7 @@ impl TradesAggregator {
             price: rounded_price,
             amount: rounded_amount,
             trade_no,
-            order_id: "".to_string(),
+            order_id: 0,
             position: 0.0,
             rpnl: 0.0,
             flags: trades.len() as i32, // Store number of source trades
@@ -130,17 +134,78 @@ impl TradesAggregator {
         })
     }
 
+    // Adjusts start time to Monday midnight UTC if week-aligned
+    fn adjust_to_monday(&self, ts: DateTime<Utc>) -> DateTime<Utc> {
+        let mut adjusted = ts;
+        while adjusted.weekday() != Weekday::Mon {
+            adjusted = adjusted - Duration::days(1);
+        }
+        adjusted
+            .with_hour(0)
+            .expect("Invalid datetime")
+            .with_minute(0)
+            .expect("Invalid datetime")
+            .with_second(0)
+            .expect("Invalid datetime")
+            .with_nanosecond(0)
+            .expect("Invalid datetime")
+    }
+
+    // Adjusts end time to Sunday midnight UTC if week-aligned
+    fn adjust_to_sunday(&self, ts: DateTime<Utc>) -> DateTime<Utc> {
+        let mut adjusted = ts;
+        while adjusted.weekday() != Weekday::Sun {
+            adjusted = adjusted + Duration::days(1);
+        }
+        adjusted
+            .with_hour(23)
+            .expect("Invalid datetime")
+            .with_minute(59)
+            .expect("Invalid datetime")
+            .with_second(59)
+            .expect("Invalid datetime")
+            .with_nanosecond(999_999_999)
+            .expect("Invalid datetime")
+    }
+
     // Aggregates trades using coarse method (fixed time intervals)
     pub async fn aggregate_coarse(&mut self) -> Result<(), AppError> {
-        debug!("#DBG: Aggregating trades in coarse mode with interval={:?}", self.interval);
+        debug!("#DBG: Aggregating trades in coarse mode with interval={:?}, week_align={}", self.interval, self.week_align);
         let trades = self.trades_cache.get_trades(self.start_ts, self.end_ts).await?;
         
-        let mut current_ts = self.start_ts;
-        while current_ts < self.end_ts {
-            let window_end = current_ts + self.interval;
-            let current_date = current_ts.date_naive();
+        let interval_days = self.interval.num_days();
+        let is_weekly = interval_days == 7;
+        let is_monthly = interval_days >= 28 && interval_days <= 31;
+        let is_quarterly = interval_days >= 90 && interval_days <= 92;
+        let is_yearly = interval_days >= 365 && interval_days <= 366;
+
+        let mut current_ts = if self.week_align && (is_weekly || is_monthly || is_quarterly || is_yearly) {
+            self.adjust_to_monday(self.start_ts)
+        } else {
+            self.start_ts
+        };
+        let end_ts = if self.week_align && (is_monthly || is_quarterly || is_yearly) {
+            self.adjust_to_sunday(self.end_ts)
+        } else {
+            self.end_ts
+        };
+
+        while current_ts < end_ts {
+            let window_end = if is_weekly {
+                current_ts + Duration::days(7)
+            } else if is_monthly {
+                current_ts + Months::new(1)
+            } else if is_quarterly {
+                current_ts + Months::new(3)
+            } else if is_yearly {
+                current_ts + Months::new(12)
+            } else {
+                current_ts + self.interval
+            };
+
+            debug!("#DBG: Processing window: start={}, end={}", current_ts, window_end);
             let window_trades: Vec<&Trade> = trades.iter()
-                .filter(|t| t.ts.date_naive() == current_date)
+                .filter(|t| t.ts >= current_ts && t.ts < window_end)
                 .collect();
 
             // Aggregate buys
@@ -220,8 +285,8 @@ impl TradesAggregator {
 impl Task for TradesAggregator {
     delegate! {
         to self.base {
-            fn status(&self) -> Status;
-            fn set_status(&mut self, status: Status);
+            fn status(&self) -> TaskStatus;
+            fn set_status(&mut self, status: TaskStatus);
             fn result(&self) -> serde_json::Value;
             fn set_result(&mut self, result: serde_json::Value);
             fn start_at(&self) -> DateTime<Utc>;
@@ -238,9 +303,11 @@ impl Task for TradesAggregator {
     }
 
     // Executes the task, aggregating trades
-    async fn run(&mut self) -> Result<Status, String> {
-        debug!("#DBG: Running TradesAggregator for pair_id={}, calc_method={:?}", 
-            self.trades_cache.pair_id, self.calc_method);
+    // Note: This method should only be called by TaskProcessor in a dedicated thread as part of Task trait implementation.
+    // For direct aggregation in API or other contexts, use aggregate_coarse() or aggregate_precise() instead.
+    async fn run(&mut self) -> Result<TaskStatus, String> {
+        debug!("#DBG: Running TradesAggregator for pair_id={}, calc_method={:?}, week_align={}", 
+            self.trades_cache.pair_id, self.calc_method, self.week_align);
 
         let result = match self.calc_method {
             CalcMethod::Coarse => self.aggregate_coarse().await,
@@ -252,14 +319,14 @@ impl Task for TradesAggregator {
                 info!("#INFO: Successfully aggregated {} trades for pair_id={}", 
                     self.results.len(), self.trades_cache.pair_id);
                 self.set_result(serde_json::Value::String(format!("Aggregated {} trades", self.results.len())));
-                self.set_status(Status::Completed);
-                Ok(Status::Completed)
+                self.set_status(TaskStatus::Completed);
+                Ok(TaskStatus::Completed)
             }
             Err(e) => {
                 error!("#ERROR: Failed to aggregate trades: {}", e);
                 self.set_result(serde_json::Value::String(format!("Failed: {}", e)));
-                self.set_status(Status::Failed);
-                Ok(Status::Failed)
+                self.set_status(TaskStatus::Failed);
+                Ok(TaskStatus::Failed)
             }
         }
     }

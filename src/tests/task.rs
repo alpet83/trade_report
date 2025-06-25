@@ -1,6 +1,3 @@
-// /src/tests/task.rs
-// Modified: 2025-06-24 07:41:00 EEST
-
 use chrono::{DateTime, Utc};
 use serde_json::Value;
 use tokio::time::{sleep, Duration};
@@ -85,7 +82,7 @@ async fn test_task_processor_add_and_run() {
     // Add task to scheduled queue
     debug!("Adding TestTask to TaskProcessor");
     let task = TestTask::new();
-    processor.add(Box::new(task)).await.expect("Failed to add task");
+    let task_id = processor.add(Box::new(task)).await.expect("Failed to add task");
 
     // Wait for task to be processed
     debug!("Waiting 150ms for task to complete");
@@ -95,17 +92,15 @@ async fn test_task_processor_add_and_run() {
     processor.print_status().await;
 
     // Check if task is in completed queue
-    let completed_tasks = processor.get_completed_tasks();
+    let completed_tasks = processor.get_completed_tasks().await;
     debug!("Completed tasks count: {}", completed_tasks.len());
     let mut task_found = false;
-    let mut task_id = 0;
     for (_, t) in completed_tasks.iter() {
         let t_read = t.read().await;
         let result = t_read.result() == Value::String("Completed successfully".to_string());
         let status = t_read.status() == TaskStatus::Completed;
         debug!("Task in completed queue: id={}, result={:?}, status={:?}", t_read.id(), t_read.result(), t_read.status());
         if result && status {
-            task_id = t_read.id();
             task_found = true;
             break;
         }
@@ -125,3 +120,9 @@ async fn test_task_processor_add_and_run() {
 
     info!("Successfully tested TaskProcessor with TestTask");
 }
+
+/*
+ * Note: Memory cleanup can be tested by creating a TradesAggregator with a large Vec<Trade>,
+ * adding it to TaskProcessor, and checking Arc::strong_count and logs after release.
+ * Use Task Manager or heaptrack to monitor memory usage.
+ */

@@ -6,9 +6,7 @@ use chrono::{DateTime, Utc};
 use serde::{Serialize, Deserialize};
 use serde_json::Value;
 use std::fmt::Debug;
-use std::sync::Arc;
-use tokio::sync::RwLock;
-use tracing::{info, debug, error};
+use tracing::{debug};
 
 use crate::services::task_processor::TaskProcessor;
 
@@ -110,7 +108,7 @@ impl TaskBase {
     }
 
     // Registers the task in the TaskProcessor
-    pub async fn self_reg<T: Task + Clone + 'static>(&self, task: T) -> Result<(), String> {
+    pub async fn self_reg<T: Task + Clone + 'static>(&self, task: T) -> Result<(u32), String> {
         debug!("Registering task in TaskProcessor");
         let processor = TaskProcessor::get();
         processor.add(Box::new(task)).await

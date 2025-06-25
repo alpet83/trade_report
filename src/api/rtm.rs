@@ -8,6 +8,7 @@ use tokio::time::{timeout, Duration};
 use tracing::{info, error, debug};
 use backtrace::Backtrace;
 use serde::{Deserialize, Deserializer};
+use serde_json::json;
 use chrono::{DateTime, Utc, Duration as ChronoDuration};
 
 use crate::{
@@ -16,6 +17,7 @@ use crate::{
     entities::trades_aggregator::{TradesAggregator, CalcMethod},
     entities::trade::Trade,
     entities::task::TaskStatus,
+    services::task_processor::TaskProcessor,
     services::deposit_basic_report::{DepositBasicReport, generate_deposit_report},
     services::{chart::ChartReportGenerator, equity_report::EquityReportGenerator},
     db::mysql::MySqlDataSource,
@@ -45,6 +47,7 @@ pub struct DepositReportQuery {
     exchange: Option<String>,
     account_id: Option<u32>,
     applicant: Option<String>,
+    pair_id: Option<i32>,
     period: Option<i64>,
     period_type: Option<String>, // Supports weekly period
     value_column: Option<String>,
@@ -52,7 +55,7 @@ pub struct DepositReportQuery {
     end_ts: Option<String>,
     width: Option<u32>,
     height: Option<u32>,
-    #[serde(deserialize_with = "deserialize_dark")]
+    #[serde(default, deserialize_with = "deserialize_dark")]
     pub dark: Option<bool>, // Supports 1, 0, true, false
     coarse_interval: Option<String>, // e.g., "1d", "7d", "30d", "90d", "365d"
     precise_comb: Option<String>, // "1" for precise aggregation
@@ -131,7 +134,8 @@ async fn get_deposit_report(Query(params): Query<DepositReportQuery>) -> Result<
     ).await?;
     debug!("Selected account_id: {}, exchange: {}", account.account_id, account.exchange.name);
 
-    let (start_ts, end_ts) = resolve_time_range(params.start_ts, params.end_ts, params.period, params.period_type.clone()).await?;
+
+    let (start_ts, end_ts) = resolve_time_range(params.start_ts, params.end_ts, params.period, params.period_type).await?;
 
     debug!("Using time range: start_ts={}, end_ts={}", start_ts, end_ts);
 
@@ -222,7 +226,7 @@ async fn get_equity_chart(Query(params): Query<DepositReportQuery>) -> Result<ax
 
 // Generates aggregated trades based on query parameters
 #[axum::debug_handler]
-async fn get_trades_aggregated(Query(params): Query<DepositReportQuery>) -> Result<Json<Vec<Trade>>, AppError> {
+async fn get_trades_aggregated(Query(params): Query<DepositReportQuery>) -> Result<Json<Value>, AppError> {
     info!("Starting aggregated trades request");
 
     debug!("Validating query parameters");
@@ -257,23 +261,32 @@ async fn get_trades_aggregated(Query(params): Query<DepositReportQuery>) -> Resu
     };
 
     let week_align = params.week_align.as_deref().map(|s| s == "1" || s.to_lowercase() == "true").unwrap_or(false);
+    let pair_id = params.pair_id.unwrap_or(BTC_PAIR_ID);
+    debug!("Creating TradesCache for account_id={}, pair_id={}", account.account_id, pair_id);
+    let trades_cache = account.get_trades_cache(pair_id).await;
+    debug!("Creating TradesAggregator with calc_method={:?}, week_align={}", calc_method, week_align);
+    let mut aggregator = TradesAggregator::new(
+        trades_cache,
+        start_ts,
+        end_ts,
+        interval,
+        calc_method.clone(),
+        week_align,
+        false, // No auto-registration in API context
+    ).await;
 
-    
+    let period_hours = (end_ts - start_ts).num_hours();
+    if period_hours > 24 {
+        // Добавляем задачу в очередь, поскольку TradesAggregator имплементирует Task
+        let processor = TaskProcessor::get();            
+        let task_id = processor.add(Box::new(aggregator.clone())).await
+           .map_err(|e| AppError::Internal(format!("Failed to schedule aggregation task: {}", e)))?;
+
+        let resp = json!({ "scheduled_task_id": task_id });
+        return Ok(Json(resp));               
+    }    
+
     let result = timeout(Duration::from_secs(60), async {
-        debug!("Creating TradesCache for account_id={}, pair_id={}", account.account_id, BTC_PAIR_ID);
-        let trades_cache = account.get_trades_cache(BTC_PAIR_ID).await;
-
-        debug!("Creating TradesAggregator with calc_method={:?}, week_align={}", calc_method, week_align);
-        let mut aggregator = TradesAggregator::new(
-            trades_cache,
-            start_ts,
-            end_ts,
-            interval,
-            calc_method.clone(),
-            week_align,
-            false, // No auto-registration in API context
-        ).await;
-
         debug!("Running aggregation");
         if calc_method == CalcMethod::Coarse {
             aggregator.aggregate_coarse().await
@@ -285,13 +298,13 @@ async fn get_trades_aggregated(Query(params): Query<DepositReportQuery>) -> Resu
 
         let trades = aggregator.results;
         debug!("Aggregation completed: {} virtual trades", trades.len());
-        Ok(Json(trades))
+        Ok(Json(serde_json::to_value(trades).unwrap()))
     })
     .await;
 
     match result {
         Ok(Ok(json)) => {
-            info!("Aggregated trades request completed: {} trades", json.0.len());
+            info!("Aggregated trades request completed: {} trades", json.as_array().unwrap().len());
             Ok(json)
         }
         Ok(Err(e)) => {

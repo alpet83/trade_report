@@ -317,8 +317,8 @@ impl Task for TradesAggregator {
         match result {
             Ok(()) => {
                 info!("#INFO: Successfully aggregated {} trades for pair_id={}", 
-                    self.results.len(), self.trades_cache.pair_id);
-                self.set_result(serde_json::Value::String(format!("Aggregated {} trades", self.results.len())));
+                    self.results.len(), self.trades_cache.pair_id);                
+                self.set_result(serde_json::to_value(self.results.clone()).unwrap());
                 self.set_status(TaskStatus::Completed);
                 Ok(TaskStatus::Completed)
             }

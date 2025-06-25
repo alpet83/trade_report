@@ -6,12 +6,11 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 use std::collections::HashMap;
 use chrono::{Utc, Duration};
-use tracing::{info, error};
+use tracing::{info};
 
 use crate::{
     entities::public_data::Candle,
-    entities::cache::{PriceCache, LoadPriceCacheTask},
-    db::mysql::MySqlDataSource,
+    entities::cache::{PriceCache, LoadPriceCacheTask},    
     common::consts::BTC_PAIR_ID,
 };
 

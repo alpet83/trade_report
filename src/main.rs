@@ -1,12 +1,12 @@
 // /src/main.rs
-// Modified: 2025-06-23 10:00:00 EEST
+// Modified: 2025-06-25 16:26 EEST
 
 use axum::{Router, routing::get};
 use tokio::net::TcpListener;
 use tracing::{info, error, debug};
 use tracing_subscriber::EnvFilter;
 use trade_report::{
-    api::{report, rtm},
+    api::{report, rtm, task}, // Added task
     config::Config,
     entities::account,
     db::mysql::MySqlDataSource,
@@ -50,14 +50,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     drop(guard);
     info!("TradingAccountManager initialized");
 
-    
-
     // Set up router with API routes
     debug!("Setting up Axum router");
     let app = Router::new()
-        .route("/", get(|| async { "Trade Report v0.1" }))
+        .route("/", get(|| async { "Trade Report v0.3.0" }))
         .nest("/api", report::routes())
-        .nest("/rtm", rtm::routes());
+        .nest("/rtm", rtm::routes())
+        .nest("/task", task::routes()); // Added task routes
 
     // Start server
     debug!("Starting server on port {}", config.server.api_port);

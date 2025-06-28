@@ -22,15 +22,23 @@
     {"timestamp": "2025-01-28T00:00:00Z", "buy": false, "price": 69000.0, "amount": 290.0, "source_trades_count": 1, "trade_no": "sell_10"}
   ],
   "weekly": [
-    {"timestamp": "2024-12-02T00:00:00Z", "buy": true, "price": 52000.0, "amount": 360.0, "source_trades_count": 3, "trade_no": "buy_1:buy_3"},
-    {"timestamp": "2024-12-02T00:00:00Z", "buy": false, "price": 53000.0, "amount": 390.0, "source_trades_count": 3, "trade_no": "sell_1:sell_3"},
-    {"timestamp": "2024-12-16T00:00:00Z", "buy": true, "price": 56000.0, "amount": 340.0, "source_trades_count": 2, "trade_no": "buy_4:buy_5"},
-    {"timestamp": "2024-12-16T00:00:00Z", "buy": false, "price": 57000.0, "amount": 360.0, "source_trades_count": 2, "trade_no": "sell_4:sell_5"},
-    {"timestamp": "2024-12-30T00:00:00Z", "buy": true, "price": 61000.0, "amount": 420.0, "source_trades_count": 2, "trade_no": "buy_6:buy_7"},
-    {"timestamp": "2024-12-30T00:00:00Z", "buy": false, "price": 62000.0, "amount": 440.0, "source_trades_count": 2, "trade_no": "sell_6:sell_7"},
-    {"timestamp": "2025-01-13T00:00:00Z", "buy": true, "price": 65000.0, "amount": 500.0, "source_trades_count": 2, "trade_no": "buy_8:buy_9"},
-    {"timestamp": "2025-01-13T00:00:00Z", "buy": false, "price": 66000.0, "amount": 520.0, "source_trades_count": 2, "trade_no": "sell_8:sell_9"},
-    {"timestamp": "2025-01-27T00:00:00Z", "buy": true, "price": 68000.0, "amount": 280.0, "source_trades_count": 1, "trade_no": "buy_10"},
+    {"timestamp": "2024-11-25T00:00:00Z", "buy": true, "price": 50000.0, "amount": 100.0, "source_trades_count": 1, "trade_no": "buy_1"},
+    {"timestamp": "2024-12-02T00:00:00Z", "buy": true, "price": 52000.0, "amount": 120.0, "source_trades_count": 1, "trade_no": "buy_2"},
+    {"timestamp": "2024-12-02T00:00:00Z", "buy": false, "price": 51000.0, "amount": 110.0, "source_trades_count": 1, "trade_no": "sell_1"},
+    {"timestamp": "2024-12-09T00:00:00Z", "buy": true, "price": 54000.0, "amount": 140.0, "source_trades_count": 1, "trade_no": "buy_3"},
+    {"timestamp": "2024-12-09T00:00:00Z", "buy": false, "price": 53000.0, "amount": 130.0, "source_trades_count": 1, "trade_no": "sell_2"},
+    {"timestamp": "2024-12-16T00:00:00Z", "buy": true, "price": 56000.0, "amount": 160.0, "source_trades_count": 1, "trade_no": "buy_4"},
+    {"timestamp": "2024-12-16T00:00:00Z", "buy": false, "price": 56062.5, "amount": 320.0, "source_trades_count": 2, "trade_no": "sell_3:sell_4"},
+    {"timestamp": "2024-12-23T00:00:00Z", "buy": true, "price": 58000.0, "amount": 180.0, "source_trades_count": 1, "trade_no": "buy_5"},
+    {"timestamp": "2024-12-23T00:00:00Z", "buy": false, "price": 59000.0, "amount": 190.0, "source_trades_count": 1, "trade_no": "sell_5"},
+    {"timestamp": "2024-12-30T00:00:00Z", "buy": true, "price": 60000.0, "amount": 200.0, "source_trades_count": 1, "trade_no": "buy_6"},
+    {"timestamp": "2024-12-30T00:00:00Z", "buy": false, "price": 61000.0, "amount": 210.0, "source_trades_count": 1, "trade_no": "sell_6"},
+    {"timestamp": "2025-01-06T00:00:00Z", "buy": true, "price": 62000.0, "amount": 220.0, "source_trades_count": 1, "trade_no": "buy_7"},
+    {"timestamp": "2025-01-06T00:00:00Z", "buy": false, "price": 63000.0, "amount": 230.0, "source_trades_count": 1, "trade_no": "sell_7"},
+    {"timestamp": "2025-01-13T00:00:00Z", "buy": true, "price": 65040.0, "amount": 500.0, "source_trades_count": 2, "trade_no": "buy_8:buy_9"},
+    {"timestamp": "2025-01-13T00:00:00Z", "buy": false, "price": 65000.0, "amount": 250.0, "source_trades_count": 1, "trade_no": "sell_8"},
+    {"timestamp": "2025-01-20T00:00:00Z", "buy": true, "price": 68000.0, "amount": 280.0, "source_trades_count": 1, "trade_no": "buy_10"},
+    {"timestamp": "2025-01-20T00:00:00Z", "buy": false, "price": 67000.0, "amount": 270.0, "source_trades_count": 1, "trade_no": "sell_9"},
     {"timestamp": "2025-01-27T00:00:00Z", "buy": false, "price": 69000.0, "amount": 290.0, "source_trades_count": 1, "trade_no": "sell_10"}
   ],
   "monthly": [
@@ -62,5 +70,27 @@
   "yearly_week_aligned": [
     {"timestamp": "2024-11-25T00:00:00Z", "buy": true, "price": 59500.0, "amount": 2080.0, "source_trades_count": 10, "trade_no": "buy_1:buy_10"},
     {"timestamp": "2024-11-25T00:00:00Z", "buy": false, "price": 60500.0, "amount": 2190.0, "source_trades_count": 10, "trade_no": "sell_1:sell_10"}
+  ],
+  "precise": [
+    {"timestamp": "2024-12-01T00:00:00Z", "buy": true, "price": 50000.0, "amount": 100.0, "source_trades_count": 1, "trade_no": "buy_1"},
+    {"timestamp": "2024-12-04T00:00:00Z", "buy": false, "price": 51000.0, "amount": 110.0, "source_trades_count": 1, "trade_no": "sell_1"},
+    {"timestamp": "2024-12-07T00:00:00Z", "buy": true, "price": 52000.0, "amount": 120.0, "source_trades_count": 1, "trade_no": "buy_2"},
+    {"timestamp": "2024-12-10T00:00:00Z", "buy": false, "price": 53000.0, "amount": 130.0, "source_trades_count": 1, "trade_no": "sell_2"},
+    {"timestamp": "2024-12-13T00:00:00Z", "buy": true, "price": 54000.0, "amount": 140.0, "source_trades_count": 1, "trade_no": "buy_3"},
+    {"timestamp": "2024-12-16T00:00:00Z", "buy": false, "price": 55000.0, "amount": 150.0, "source_trades_count": 1, "trade_no": "sell_3"},
+    {"timestamp": "2024-12-19T00:00:00Z", "buy": true, "price": 56000.0, "amount": 160.0, "source_trades_count": 1, "trade_no": "buy_4"},
+    {"timestamp": "2024-12-22T00:00:00Z", "buy": false, "price": 57000.0, "amount": 170.0, "source_trades_count": 1, "trade_no": "sell_4"},
+    {"timestamp": "2024-12-25T00:00:00Z", "buy": true, "price": 58000.0, "amount": 180.0, "source_trades_count": 1, "trade_no": "buy_5"},
+    {"timestamp": "2024-12-28T00:00:00Z", "buy": false, "price": 59000.0, "amount": 190.0, "source_trades_count": 1, "trade_no": "sell_5"},
+    {"timestamp": "2025-01-01T00:00:00Z", "buy": true, "price": 60000.0, "amount": 200.0, "source_trades_count": 1, "trade_no": "buy_6"},
+    {"timestamp": "2025-01-04T00:00:00Z", "buy": false, "price": 61000.0, "amount": 210.0, "source_trades_count": 1, "trade_no": "sell_6"},
+    {"timestamp": "2025-01-07T00:00:00Z", "buy": true, "price": 62000.0, "amount": 220.0, "source_trades_count": 1, "trade_no": "buy_7"},
+    {"timestamp": "2025-01-10T00:00:00Z", "buy": false, "price": 63000.0, "amount": 230.0, "source_trades_count": 1, "trade_no": "sell_7"},
+    {"timestamp": "2025-01-13T00:00:00Z", "buy": true, "price": 64000.0, "amount": 240.0, "source_trades_count": 1, "trade_no": "buy_8"},
+    {"timestamp": "2025-01-16T00:00:00Z", "buy": false, "price": 65000.0, "amount": 250.0, "source_trades_count": 1, "trade_no": "sell_8"},
+    {"timestamp": "2025-01-19T00:00:00Z", "buy": true, "price": 66000.0, "amount": 260.0, "source_trades_count": 1, "trade_no": "buy_9"},
+    {"timestamp": "2025-01-22T00:00:00Z", "buy": false, "price": 67000.0, "amount": 270.0, "source_trades_count": 1, "trade_no": "sell_9"},
+    {"timestamp": "2025-01-25T00:00:00Z", "buy": true, "price": 68000.0, "amount": 280.0, "source_trades_count": 1, "trade_no": "buy_10"},
+    {"timestamp": "2025-01-28T00:00:00Z", "buy": false, "price": 69000.0, "amount": 290.0, "source_trades_count": 1, "trade_no": "sell_10"}
   ]
 }

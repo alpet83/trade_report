@@ -108,7 +108,7 @@ impl TaskBase {
     }
 
     // Registers the task in the TaskProcessor
-    pub async fn self_reg<T: Task + Clone + 'static>(&self, task: T) -> Result<(u32), String> {
+    pub async fn self_reg<T: Task + Clone + 'static>(&self, task: T) -> Result<u32, String> {
         debug!("Registering task in TaskProcessor");
         let processor = TaskProcessor::get();
         processor.add(Box::new(task)).await

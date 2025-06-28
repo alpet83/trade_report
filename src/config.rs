@@ -92,7 +92,7 @@ impl BotConfigMap {
                 let current_account_id: u32 = sid.try_into().unwrap();
 
                 if account_id.is_none() {
-                    account_id = Some(current_account_id);                        ;
+                    account_id = Some(current_account_id);
                 } else if account_id != Some(current_account_id) {
                     return Err(format!("Inconsistent account_id in {}", table_name));
                 }

@@ -1,9 +1,6 @@
-// /src/entities/trades_aggregator.rs
-// Modified: 2025-06-24 14:55:00 EEST
-
 use async_trait::async_trait;
-use chrono::{DateTime, Utc, Duration, Datelike, Timelike, Weekday, Months};
-use serde_json::Value;
+use chrono::{DateTime, Utc, Duration, Datelike, Timelike, Weekday};
+use serde_json::{to_value};
 use std::sync::Arc;
 use tracing::{debug, error, info};
 use delegate::delegate;
@@ -171,39 +168,28 @@ impl TradesAggregator {
     // Aggregates trades using coarse method (fixed time intervals)
     pub async fn aggregate_coarse(&mut self) -> Result<(), AppError> {
         debug!("#DBG: Aggregating trades in coarse mode with interval={:?}, week_align={}", self.interval, self.week_align);
-        let trades = self.trades_cache.get_trades(self.start_ts, self.end_ts).await?;
+        let mut trades = self.trades_cache.get_trades(self.start_ts, self.end_ts).await?;
+        
+        // Sort trades by timestamp to ensure chronological order
+        trades.sort_by(|a, b| a.ts.cmp(&b.ts));
+        debug!("#DBG: Sorted {} trades for aggregation", trades.len());
         
         let interval_days = self.interval.num_days();
         let is_weekly = interval_days == 7;
-        let is_monthly = interval_days >= 28 && interval_days <= 31;
-        let is_quarterly = interval_days >= 90 && interval_days <= 92;
-        let is_yearly = interval_days >= 365 && interval_days <= 366;
 
-        let mut current_ts = if self.week_align && (is_weekly || is_monthly || is_quarterly || is_yearly) {
+        let mut current_ts = if self.week_align && is_weekly {
             self.adjust_to_monday(self.start_ts)
         } else {
             self.start_ts
         };
-        let end_ts = if self.week_align && (is_monthly || is_quarterly || is_yearly) {
+        let end_ts = if self.week_align && is_weekly {
             self.adjust_to_sunday(self.end_ts)
         } else {
             self.end_ts
         };
 
         while current_ts < end_ts {
-            let window_end = if is_weekly {
-                current_ts + Duration::days(7)
-            } else if is_monthly {
-                current_ts + Months::new(1)
-            } else if is_quarterly {
-                current_ts + Months::new(3)
-            } else if is_yearly {
-                current_ts + Months::new(12)
-            } else {
-                current_ts + self.interval
-            };
-
-            debug!("#DBG: Processing window: start={}, end={}", current_ts, window_end);
+            let window_end = current_ts + self.interval;
             let window_trades: Vec<&Trade> = trades.iter()
                 .filter(|t| t.ts >= current_ts && t.ts < window_end)
                 .collect();
@@ -213,8 +199,11 @@ impl TradesAggregator {
                 .filter(|t| t.buy)
                 .cloned()
                 .collect();
-            if let Some(buy_trade) = self.aggregate_trades(buys, true, current_ts, self.trades_cache.pair_id) {
-                self.results.push(buy_trade);
+            if !buys.is_empty() {
+                debug!("#DBG: Aggregating {} buy trades for window starting at {}", buys.len(), current_ts);
+                if let Some(buy_trade) = self.aggregate_trades(buys, true, current_ts, self.trades_cache.pair_id) {
+                    self.results.push(buy_trade);
+                }
             }
 
             // Aggregate sells
@@ -222,27 +211,41 @@ impl TradesAggregator {
                 .filter(|t| !t.buy)
                 .cloned()
                 .collect();
-            if let Some(sell_trade) = self.aggregate_trades(sells, false, current_ts, self.trades_cache.pair_id) {
-                self.results.push(sell_trade);
+            if !sells.is_empty() {
+                debug!("#DBG: Aggregating {} sell trades for window starting at {}", sells.len(), current_ts);
+                if let Some(sell_trade) = self.aggregate_trades(sells, false, current_ts, self.trades_cache.pair_id) {
+                    self.results.push(sell_trade);
+                }
             }
 
             current_ts = window_end;
         }
 
+        // Sort results by timestamp and direction (buy first, then sell)
+        self.results.sort_by(|a, b| a.ts.cmp(&b.ts).then(a.buy.cmp(&b.buy).reverse()));
+        debug!("#DBG: Sorted {} virtual trades in results", self.results.len());
+
         info!("#INFO: Coarse aggregation completed: {} virtual trades", self.results.len());
         Ok(())
     }
 
-    // Aggregates trades using precise method (window closes on direction change)
+    // Aggregates trades using precise method (based on direction changes)
+    // Note: Combines consecutive trades of the same direction (buy or sell) into a single virtual trade.
+    // If trades alternate directions (e.g., buy, sell, buy), each trade remains separate.
     pub async fn aggregate_precise(&mut self) -> Result<(), AppError> {
         debug!("#DBG: Aggregating trades in precise mode");
-        let trades = self.trades_cache.get_trades(self.start_ts, self.end_ts).await?;
+        let mut trades = self.trades_cache.get_trades(self.start_ts, self.end_ts).await?;
+        
+        // Sort trades by timestamp to ensure chronological order
+        trades.sort_by(|a, b| a.ts.cmp(&b.ts));
+        debug!("#DBG: Sorted {} trades for precise aggregation", trades.len());
         
         let mut current_trades: Vec<&Trade> = Vec::new();
         let mut current_direction: Option<bool> = None;
 
         for trade in trades.iter() {
             let trade_direction = trade.buy;
+
             if current_direction.is_none() {
                 current_direction = Some(trade_direction);
                 current_trades.push(trade);
@@ -253,7 +256,7 @@ impl TradesAggregator {
                 if let Some(virtual_trade) = self.aggregate_trades(
                     current_trades.clone(),
                     current_direction.unwrap(),
-                    current_trades[0].ts,
+                    current_trades[0].ts, // Use first trade's timestamp
                     self.trades_cache.pair_id
                 ) {
                     self.results.push(virtual_trade);
@@ -269,12 +272,16 @@ impl TradesAggregator {
             if let Some(virtual_trade) = self.aggregate_trades(
                 current_trades.clone(),
                 current_direction.unwrap(),
-                current_trades[0].ts,
+                current_trades[0].ts, // Use first trade's timestamp
                 self.trades_cache.pair_id
             ) {
                 self.results.push(virtual_trade);
             }
         }
+
+        // Sort results by timestamp for consistency
+        self.results.sort_by(|a, b| a.ts.cmp(&b.ts));
+        debug!("#DBG: Sorted {} virtual trades in precise results", self.results.len());
 
         info!("#INFO: Precise aggregation completed: {} virtual trades", self.results.len());
         Ok(())
@@ -303,8 +310,6 @@ impl Task for TradesAggregator {
     }
 
     // Executes the task, aggregating trades
-    // Note: This method should only be called by TaskProcessor in a dedicated thread as part of Task trait implementation.
-    // For direct aggregation in API or other contexts, use aggregate_coarse() or aggregate_precise() instead.
     async fn run(&mut self) -> Result<TaskStatus, String> {
         debug!("#DBG: Running TradesAggregator for pair_id={}, calc_method={:?}, week_align={}", 
             self.trades_cache.pair_id, self.calc_method, self.week_align);
@@ -318,7 +323,7 @@ impl Task for TradesAggregator {
             Ok(()) => {
                 info!("#INFO: Successfully aggregated {} trades for pair_id={}", 
                     self.results.len(), self.trades_cache.pair_id);                
-                self.set_result(serde_json::to_value(self.results.clone()).unwrap());
+                self.set_result(to_value(self.results.clone()).map_err(|e| format!("Failed to serialize trades: {}", e))?);
                 self.set_status(TaskStatus::Completed);
                 Ok(TaskStatus::Completed)
             }

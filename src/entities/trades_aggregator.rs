@@ -1,5 +1,5 @@
 use async_trait::async_trait;
-use chrono::{DateTime, Utc, Duration, Datelike, Timelike, Weekday};
+use chrono::{DateTime, Utc, Duration};
 use serde_json::{to_value};
 use std::sync::Arc;
 use tracing::{debug, error, info};
@@ -11,6 +11,10 @@ use crate::{
     entities::task::{Task, TaskStatus, TaskBase},
     logs::app_error::AppError,
     common::math::auto_round,
+    common::interval_func::{
+        adjust_to_monday, adjust_to_first_of_month, adjust_to_first_of_quarter, adjust_to_first_of_year,
+        HOUR_SECONDS, DAY_SECONDS, WEEK_SECONDS, MONTH_SECONDS, QUARTER_SECONDS, YEAR_SECONDS,
+    },
 };
 
 // Defines aggregation method for trades
@@ -29,7 +33,7 @@ pub struct TradesAggregator {
     pub end_ts: DateTime<Utc>,
     pub interval: Duration,
     pub calc_method: CalcMethod,
-    pub week_align: bool, // Align intervals to weeks (Monday to Sunday)
+    pub week_align: bool,
     pub results: Vec<Trade>,
 }
 
@@ -49,7 +53,6 @@ impl Clone for TradesAggregator {
 }
 
 impl TradesAggregator {
-    // Creates a new TradesAggregator instance, optionally registering it in TaskProcessor
     pub async fn new(
         trades_cache: Arc<TradesCache>,
         start_ts: DateTime<Utc>,
@@ -76,14 +79,13 @@ impl TradesAggregator {
             if let Err(e) = task.base.self_reg(task.clone()).await {
                 error!("#ERROR: Failed to auto-register TradesAggregator: {}", e);
             } else {
-                info!("#INFO: Successfully auto-registered TradesAggregator for pair_id={}", 
+                info!("#INFO: Auto-registered TradesAggregator for pair_id={}", 
                     task.trades_cache.pair_id);
             }
         }
         task
     }
 
-    // Aggregates a set of trades into a single virtual trade
     fn aggregate_trades(&self, trades: Vec<&Trade>, buy: bool, ts: DateTime<Utc>, pair_id: i32) -> Option<Trade> {
         if trades.is_empty() {
             return None;
@@ -96,20 +98,17 @@ impl TradesAggregator {
             0.0 
         };
         
-        // Apply auto_round to final values
         let rounded_amount = auto_round(total_amount, 0);
         let rounded_price = auto_round(avg_price, 0);
 
-        // Debug log for each source trade
         let trade_type = if buy { "buy" } else { "sell" };
         for trade in &trades {
-            debug!("#DBG: Source trade: trade_no={}, ts={}, price={}, amount={} included in virtual {} trade at {}", 
+            debug!("#DBG: Source trade: trade_no={}, ts={}, price={}, amount={} in virtual {} trade at {}", 
                 trade.trade_no, trade.ts, trade.price, trade.amount, trade_type, ts);
         }
-        debug!("#DBG: input price {}, amount {}, production price {}, amount {}", 
+        debug!("#DBG: input price {}, amount {}, output price {}, amount {}", 
             avg_price, total_amount, rounded_price, rounded_amount);
 
-        // Form trade_no with first and last trade_no
         let trade_no = if trades.len() == 1 {
             trades[0].trade_no.clone()
         } else {
@@ -126,119 +125,77 @@ impl TradesAggregator {
             order_id: 0,
             position: 0.0,
             rpnl: 0.0,
-            flags: trades.len() as i32, // Store number of source trades
+            flags: trades.len() as i32,
             comission: 0.0,
         })
     }
 
-    // Adjusts start time to Monday midnight UTC if week-aligned
-    fn adjust_to_monday(&self, ts: DateTime<Utc>) -> DateTime<Utc> {
-        let mut adjusted = ts;
-        while adjusted.weekday() != Weekday::Mon {
-            adjusted = adjusted - Duration::days(1);
-        }
-        adjusted
-            .with_hour(0)
-            .expect("Invalid datetime")
-            .with_minute(0)
-            .expect("Invalid datetime")
-            .with_second(0)
-            .expect("Invalid datetime")
-            .with_nanosecond(0)
-            .expect("Invalid datetime")
-    }
-
-    // Adjusts end time to Sunday midnight UTC if week-aligned
-    fn adjust_to_sunday(&self, ts: DateTime<Utc>) -> DateTime<Utc> {
-        let mut adjusted = ts;
-        while adjusted.weekday() != Weekday::Sun {
-            adjusted = adjusted + Duration::days(1);
-        }
-        adjusted
-            .with_hour(23)
-            .expect("Invalid datetime")
-            .with_minute(59)
-            .expect("Invalid datetime")
-            .with_second(59)
-            .expect("Invalid datetime")
-            .with_nanosecond(999_999_999)
-            .expect("Invalid datetime")
-    }
-
-    // Aggregates trades using coarse method (fixed time intervals)
     pub async fn aggregate_coarse(&mut self) -> Result<(), AppError> {
-        debug!("#DBG: Aggregating trades in coarse mode with interval={:?}, week_align={}", self.interval, self.week_align);
+        debug!("#DBG: Aggregating trades in coarse mode with interval={:?}, week_align={}", 
+            self.interval, self.week_align);
         let mut trades = self.trades_cache.get_trades(self.start_ts, self.end_ts).await?;
-        
-        // Sort trades by timestamp to ensure chronological order
         trades.sort_by(|a, b| a.ts.cmp(&b.ts));
-        debug!("#DBG: Sorted {} trades for aggregation", trades.len());
-        
-        let interval_days = self.interval.num_days();
-        let is_weekly = interval_days == 7;
+        debug!("#DBG: Sorted {} trades", trades.len());
 
-        let mut current_ts = if self.week_align && is_weekly {
-            self.adjust_to_monday(self.start_ts)
-        } else {
-            self.start_ts
-        };
-        let end_ts = if self.week_align && is_weekly {
-            self.adjust_to_sunday(self.end_ts)
-        } else {
-            self.end_ts
-        };
+        let interval_seconds = self.interval.num_seconds();
+        let is_weekly = interval_seconds == WEEK_SECONDS;
+        let is_monthly = interval_seconds == MONTH_SECONDS;
+        let is_quarterly = interval_seconds == QUARTER_SECONDS;
+        let is_yearly = interval_seconds == YEAR_SECONDS;
+        let mut buys: std::collections::HashMap<DateTime<Utc>, Vec<&Trade>> = std::collections::HashMap::new();
+        let mut sells: std::collections::HashMap<DateTime<Utc>, Vec<&Trade>> = std::collections::HashMap::new();
 
-        while current_ts < end_ts {
-            let window_end = current_ts + self.interval;
-            let window_trades: Vec<&Trade> = trades.iter()
-                .filter(|t| t.ts >= current_ts && t.ts < window_end)
-                .collect();
+        for trade in trades.iter() {
+            let window_start = if is_yearly {
+                adjust_to_first_of_year(trade.ts, self.week_align)
+            } else if is_quarterly {
+                adjust_to_first_of_quarter(trade.ts, self.week_align)
+            } else if is_monthly {
+                adjust_to_first_of_month(trade.ts, interval_seconds, self.week_align)
+            } else if is_weekly {
+                adjust_to_monday(trade.ts)
+            } else {
+                let seconds_since_start = (trade.ts.timestamp() - self.start_ts.timestamp()) / interval_seconds * interval_seconds;
+                self.start_ts + Duration::seconds(seconds_since_start)
+            };
+            if trade.buy {
+                buys.entry(window_start).or_insert_with(Vec::new).push(trade);
+            } else {
+                sells.entry(window_start).or_insert_with(Vec::new).push(trade);
+            }
+        }
 
-            // Aggregate buys
-            let buys: Vec<&Trade> = window_trades.iter()
-                .filter(|t| t.buy)
-                .cloned()
-                .collect();
-            if !buys.is_empty() {
-                debug!("#DBG: Aggregating {} buy trades for window starting at {}", buys.len(), current_ts);
-                if let Some(buy_trade) = self.aggregate_trades(buys, true, current_ts, self.trades_cache.pair_id) {
+        let mut window_starts: Vec<DateTime<Utc>> = buys.keys().chain(sells.keys()).cloned().collect();
+        window_starts.sort();
+        window_starts.dedup();
+
+        for window_start in window_starts {
+            if let Some(buy_trades) = buys.get(&window_start) {
+                debug!("#DBG: Aggregating {} buy trades at {}", buy_trades.len(), window_start);
+                if let Some(buy_trade) = self.aggregate_trades(buy_trades.clone(), true, window_start, self.trades_cache.pair_id) {
                     self.results.push(buy_trade);
                 }
             }
-
-            // Aggregate sells
-            let sells: Vec<&Trade> = window_trades.iter()
-                .filter(|t| !t.buy)
-                .cloned()
-                .collect();
-            if !sells.is_empty() {
-                debug!("#DBG: Aggregating {} sell trades for window starting at {}", sells.len(), current_ts);
-                if let Some(sell_trade) = self.aggregate_trades(sells, false, current_ts, self.trades_cache.pair_id) {
+            if let Some(sell_trades) = sells.get(&window_start) {
+                debug!("#DBG: Aggregating {} sell trades at {}", sell_trades.len(), window_start);
+                if let Some(sell_trade) = self.aggregate_trades(sell_trades.clone(), false, window_start, self.trades_cache.pair_id) {
                     self.results.push(sell_trade);
                 }
             }
-
-            current_ts = window_end;
         }
 
-        // Sort results by timestamp and direction (buy first, then sell)
         self.results.sort_by(|a, b| a.ts.cmp(&b.ts).then(a.buy.cmp(&b.buy).reverse()));
-        debug!("#DBG: Sorted {} virtual trades in results", self.results.len());
-
+        debug!("#DBG: Sorted {} virtual trades", self.results.len());
         info!("#INFO: Coarse aggregation completed: {} virtual trades", self.results.len());
         Ok(())
     }
 
-    // Aggregates trades using precise method (based on direction changes)
-    // Note: Combines consecutive trades of the same direction (buy or sell) into a single virtual trade.
-    // If trades alternate directions (e.g., buy, sell, buy), each trade remains separate.
     pub async fn aggregate_precise(&mut self) -> Result<(), AppError> {
         debug!("#DBG: Aggregating trades in precise mode");
         let mut trades = self.trades_cache.get_trades(self.start_ts, self.end_ts).await?;
         
-        // Sort trades by timestamp to ensure chronological order
         trades.sort_by(|a, b| a.ts.cmp(&b.ts));
-        debug!("#DBG: Sorted {} trades for precise aggregation", trades.len());
+        debug!("#DBG: Sorted {} trades", trades.len());
         
         let mut current_trades: Vec<&Trade> = Vec::new();
         let mut current_direction: Option<bool> = None;
@@ -252,11 +209,10 @@ impl TradesAggregator {
             } else if current_direction == Some(trade_direction) {
                 current_trades.push(trade);
             } else {
-                // Direction changed, close current window
                 if let Some(virtual_trade) = self.aggregate_trades(
                     current_trades.clone(),
                     current_direction.unwrap(),
-                    current_trades[0].ts, // Use first trade's timestamp
+                    current_trades[0].ts,
                     self.trades_cache.pair_id
                 ) {
                     self.results.push(virtual_trade);
@@ -267,22 +223,19 @@ impl TradesAggregator {
             }
         }
 
-        // Close final window
         if !current_trades.is_empty() {
             if let Some(virtual_trade) = self.aggregate_trades(
                 current_trades.clone(),
                 current_direction.unwrap(),
-                current_trades[0].ts, // Use first trade's timestamp
+                current_trades[0].ts,
                 self.trades_cache.pair_id
             ) {
                 self.results.push(virtual_trade);
             }
         }
 
-        // Sort results by timestamp for consistency
         self.results.sort_by(|a, b| a.ts.cmp(&b.ts));
-        debug!("#DBG: Sorted {} virtual trades in precise results", self.results.len());
-
+        debug!("#DBG: Sorted {} virtual trades", self.results.len());
         info!("#INFO: Precise aggregation completed: {} virtual trades", self.results.len());
         Ok(())
     }
@@ -303,13 +256,11 @@ impl Task for TradesAggregator {
         }
     }
 
-    // Initializes the task
     async fn init(&mut self) -> Result<(), String> {
         debug!("#DBG: Initializing TradesAggregator for pair_id={}", self.trades_cache.pair_id);
         Ok(())
     }
 
-    // Executes the task, aggregating trades
     async fn run(&mut self) -> Result<TaskStatus, String> {
         debug!("#DBG: Running TradesAggregator for pair_id={}, calc_method={:?}, week_align={}", 
             self.trades_cache.pair_id, self.calc_method, self.week_align);
@@ -321,7 +272,7 @@ impl Task for TradesAggregator {
 
         match result {
             Ok(()) => {
-                info!("#INFO: Successfully aggregated {} trades for pair_id={}", 
+                info!("#INFO: Aggregated {} trades for pair_id={}", 
                     self.results.len(), self.trades_cache.pair_id);                
                 self.set_result(to_value(self.results.clone()).map_err(|e| format!("Failed to serialize trades: {}", e))?);
                 self.set_status(TaskStatus::Completed);
@@ -336,7 +287,6 @@ impl Task for TradesAggregator {
         }
     }
 
-    // Releases resources
     async fn release(&mut self) -> Result<(), String> {
         debug!("#DBG: Releasing TradesAggregator for pair_id={}", self.trades_cache.pair_id);
         self.results.clear();

@@ -1,5 +1,5 @@
 // /src/services/cache/trades.rs
-// Modified: 2025-06-24 15:51:00 EEST
+// Modified: 2025-06-30 14:30:00 EEST
 
 use chrono::{DateTime, Utc};
 use dashmap::DashMap;
@@ -18,7 +18,7 @@ use crate::{
 };
 
 impl TradesCache {
-    // Creates a new Trades liberals
+    // Creates a new TradesCache
     pub fn new(account: Arc<TradingAccount>, pair_id: i32) -> Self {
         debug!("Creating new TradesCache for account_id={}, pair_id={}", account.account_id, pair_id);
         TradesCache {
@@ -64,7 +64,7 @@ impl TradesCache {
         let file = File::open(&file_name)
             .map_err(|e| AppError::Internal(format!("Failed to open CSV file {}: {}", file_name, e)))?;
         let mut rdr = ReaderBuilder::new()
-            .has_headers(false)
+            .has_headers(true) // Assuming header row
             .from_reader(file);
 
         let mut trades = Vec::new();
@@ -74,15 +74,45 @@ impl TradesCache {
                 return Err(AppError::Internal(format!("Invalid CSV record {}: expected 5 fields, got {}", i + 1, record.len())));
             }
 
-            // Handle both Z and +00:00 timezone formats
-            let ts_str = if record[0].ends_with('Z') {
-                format!("{}+00:00", record[0].trim_end_matches('Z'))
-            } else {
-                record[0].to_string()
-            };
-            let ts: DateTime<Utc> = DateTime::parse_from_str(&ts_str, "%Y-%m-%dT%H:%M:%S%.3f%z")
-                .map_err(|e| AppError::Internal(format!("Invalid timestamp in record {}: {}", i + 1, e)))?
-                .with_timezone(&Utc);
+            let ts_str = record[0].trim();
+            debug!("#DBG: Parsing timestamp '{}' for record {}", ts_str, i + 1);
+
+            // Define possible timestamp formats (covering SQL/ClickHouse exports)
+            let formats = [
+                "%Y-%m-%dT%H:%M:%S%.3fZ",       // 2024-12-01T00:00:00.000Z
+                "%Y-%m-%dT%H:%M:%SZ",           // 2024-12-01T00:00:00Z
+                "%Y-%m-%d %H:%M:%S%.3f%z",      // 2024-12-01 00:00:00.000+00:00
+                "%Y-%m-%d %H:%M:%S%z",          // 2024-12-01 00:00:00+00:00
+                "%Y-%m-%dT%H:%M:%S%.3f%z",      // 2024-12-01T00:00:00.000+00:00
+                "%Y-%m-%dT%H:%M:%S%z",          // 2024-12-01T00:00:00+00:00
+                "%Y-%m-%d %H:%M:%S",            // 2024-12-01 00:00:00
+                "%Y-%m-%dT%H:%M:%S",            // 2024-12-01T00:00:00
+            ];
+
+            let mut parsed_ts: Option<DateTime<Utc>> = None;
+            for &fmt in formats.iter() {
+                // Normalize 'Z' to '+00:00' if needed
+                let normalized_ts = if ts_str.ends_with('Z') {
+                    format!("{}+00:00", ts_str.trim_end_matches('Z'))
+                } else {
+                    ts_str.to_string()
+                };                
+                match DateTime::parse_from_str(&normalized_ts, fmt) {
+                    Ok(dt) => {
+                        parsed_ts = Some(dt.with_timezone(&Utc));                        
+                        break;
+                    }
+                    Err(e) => {                        
+                        continue;
+                    }
+                }
+            }
+
+            let ts = parsed_ts.ok_or_else(|| {
+                error!("#ERROR: Failed to parse timestamp '{}' in record {}", ts_str, i + 1);
+                AppError::Internal(format!("Invalid timestamp in record {}: unable to parse '{}'", i + 1, ts_str))
+            })?;
+
             let buy = match record[1].to_lowercase().as_str() {
                 "true" | "1" => true,
                 "false" | "0" => false,

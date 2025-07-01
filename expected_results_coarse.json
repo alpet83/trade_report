@@ -1,0 +1,115 @@
+[
+    {
+        "interval": "1h",
+        "trades": [
+            {"timestamp": "2024-01-01T00:00:00Z", "buy": true, "price": 40000, "amount": 100, "trade_no": "buy_q1_1"},
+            {"timestamp": "2024-01-01T01:00:00Z", "buy": false, "price": 40500, "amount": 90, "trade_no": "sell_q1_1"},
+            {"timestamp": "2024-04-01T00:00:00Z", "buy": true, "price": 45000, "amount": 120, "trade_no": "buy_q2_1"},
+            {"timestamp": "2024-04-01T01:00:00Z", "buy": false, "price": 45500, "amount": 110, "trade_no": "sell_q2_1"},
+            {"timestamp": "2024-07-01T00:00:00Z", "buy": true, "price": 50000, "amount": 130, "trade_no": "buy_q3_1"},
+            {"timestamp": "2024-07-01T01:00:00Z", "buy": false, "price": 50500, "amount": 120, "trade_no": "sell_q3_1"},
+            {"timestamp": "2024-10-01T00:00:00Z", "buy": true, "price": 55000, "amount": 140, "trade_no": "buy_q4_1"},
+            {"timestamp": "2024-10-01T01:00:00Z", "buy": false, "price": 55500, "amount": 130, "trade_no": "sell_q4_1"},
+            {"timestamp": "2024-12-31T23:00:00Z", "buy": true, "price": 60516.1, "amount": 310, "trade_no": "buy_year_1:buy_year_2"},
+            {"timestamp": "2024-12-31T23:00:00Z", "buy": false, "price": 61017.2, "amount": 290, "trade_no": "sell_year_1:sell_year_2"},
+            {"timestamp": "2025-01-01T00:00:00Z", "buy": true, "price": 62514.3, "amount": 350, "trade_no": "buy_year_3:buy_year_4"},
+            {"timestamp": "2025-01-01T00:00:00Z", "buy": false, "price": 63015.2, "amount": 330, "trade_no": "sell_year_3:sell_year_4"},
+            {"timestamp": "2025-03-01T00:00:00Z", "buy": true, "price": 65000, "amount": 190, "trade_no": "buy_q1_25_1"},
+            {"timestamp": "2025-03-01T01:00:00Z", "buy": false, "price": 65500, "amount": 180, "trade_no": "sell_q1_25_1"}
+        ]
+    },
+    {
+        "interval": "1d",
+        "trades": [
+            {"timestamp": "2024-01-01T00:00:00Z", "buy": true, "price": 40000, "amount": 100, "trade_no": "buy_q1_1"},
+            {"timestamp": "2024-01-01T00:00:00Z", "buy": false, "price": 40500, "amount": 90, "trade_no": "sell_q1_1"},
+            {"timestamp": "2024-04-01T00:00:00Z", "buy": true, "price": 45000, "amount": 120, "trade_no": "buy_q2_1"},
+            {"timestamp": "2024-04-01T00:00:00Z", "buy": false, "price": 45500, "amount": 110, "trade_no": "sell_q2_1"},
+            {"timestamp": "2024-07-01T00:00:00Z", "buy": true, "price": 50000, "amount": 130, "trade_no": "buy_q3_1"},
+            {"timestamp": "2024-07-01T00:00:00Z", "buy": false, "price": 50500, "amount": 120, "trade_no": "sell_q3_1"},
+            {"timestamp": "2024-10-01T00:00:00Z", "buy": true, "price": 55000, "amount": 140, "trade_no": "buy_q4_1"},
+            {"timestamp": "2024-10-01T00:00:00Z", "buy": false, "price": 55500, "amount": 130, "trade_no": "sell_q4_1"},
+            {"timestamp": "2024-12-31T00:00:00Z", "buy": true, "price": 60516.1, "amount": 310, "trade_no": "buy_year_1:buy_year_2"},
+            {"timestamp": "2024-12-31T00:00:00Z", "buy": false, "price": 61017.2, "amount": 290, "trade_no": "sell_year_1:sell_year_2"},
+            {"timestamp": "2025-01-01T00:00:00Z", "buy": true, "price": 62514.3, "amount": 350, "trade_no": "buy_year_3:buy_year_4"},
+            {"timestamp": "2025-01-01T00:00:00Z", "buy": false, "price": 63015.2, "amount": 330, "trade_no": "sell_year_3:sell_year_4"},
+            {"timestamp": "2025-03-01T00:00:00Z", "buy": true, "price": 65000, "amount": 190, "trade_no": "buy_q1_25_1"},
+            {"timestamp": "2025-03-01T00:00:00Z", "buy": false, "price": 65500, "amount": 180, "trade_no": "sell_q1_25_1"}
+        ]
+    },
+    {
+        "interval": "7d",
+        "trades": [
+            {"timestamp": "2024-01-01T00:00:00Z", "buy": true, "price": 40000, "amount": 100, "trade_no": "buy_q1_1"},
+            {"timestamp": "2024-01-01T00:00:00Z", "buy": false, "price": 40500, "amount": 90, "trade_no": "sell_q1_1"},
+            {"timestamp": "2024-04-01T00:00:00Z", "buy": true, "price": 45000, "amount": 120, "trade_no": "buy_q2_1"},
+            {"timestamp": "2024-04-01T00:00:00Z", "buy": false, "price": 45500, "amount": 110, "trade_no": "sell_q2_1"},
+            {"timestamp": "2024-07-01T00:00:00Z", "buy": true, "price": 50000, "amount": 130, "trade_no": "buy_q3_1"},
+            {"timestamp": "2024-07-01T00:00:00Z", "buy": false, "price": 50500, "amount": 120, "trade_no": "sell_q3_1"},
+            {"timestamp": "2024-09-30T00:00:00Z", "buy": true, "price": 55000, "amount": 140, "trade_no": "buy_q4_1"},
+            {"timestamp": "2024-09-30T00:00:00Z", "buy": false, "price": 55500, "amount": 130, "trade_no": "sell_q4_1"},
+            {"timestamp": "2024-12-30T00:00:00Z", "buy": true, "price": 61575.8, "amount": 660, "trade_no": "buy_year_1:buy_year_4"},
+            {"timestamp": "2024-12-30T00:00:00Z", "buy": false, "price": 62080.6, "amount": 620, "trade_no": "sell_year_1:sell_year_4"},
+            {"timestamp": "2025-02-24T00:00:00Z", "buy": true, "price": 65000, "amount": 190, "trade_no": "buy_q1_25_1"},
+            {"timestamp": "2025-02-24T00:00:00Z", "buy": false, "price": 65500, "amount": 180, "trade_no": "sell_q1_25_1"}
+        ]
+    },
+    {
+        "interval": "30d",
+        "trades": [
+            {"timestamp": "2024-01-01T00:00:00Z", "buy": true, "price": 40000, "amount": 100, "trade_no": "buy_q1_1"},
+            {"timestamp": "2024-01-01T00:00:00Z", "buy": false, "price": 40500, "amount": 90, "trade_no": "sell_q1_1"},
+            {"timestamp": "2024-04-01T00:00:00Z", "buy": true, "price": 45000, "amount": 120, "trade_no": "buy_q2_1"},
+            {"timestamp": "2024-04-01T00:00:00Z", "buy": false, "price": 45500, "amount": 110, "trade_no": "sell_q2_1"},
+            {"timestamp": "2024-07-01T00:00:00Z", "buy": true, "price": 50000, "amount": 130, "trade_no": "buy_q3_1"},
+            {"timestamp": "2024-07-01T00:00:00Z", "buy": false, "price": 50500, "amount": 120, "trade_no": "sell_q3_1"},
+            {"timestamp": "2024-10-01T00:00:00Z", "buy": true, "price": 55000, "amount": 140, "trade_no": "buy_q4_1"},
+            {"timestamp": "2024-10-01T00:00:00Z", "buy": false, "price": 55500, "amount": 130, "trade_no": "sell_q4_1"},
+            {"timestamp": "2025-01-01T00:00:00Z", "buy": true, "price": 61575.8, "amount": 660, "trade_no": "buy_year_1:buy_year_4"},
+            {"timestamp": "2025-01-01T00:00:00Z", "buy": false, "price": 62080.6, "amount": 620, "trade_no": "sell_year_1:sell_year_4"},
+            {"timestamp": "2025-03-01T00:00:00Z", "buy": true, "price": 65000, "amount": 190, "trade_no": "buy_q1_25_1"},
+            {"timestamp": "2025-03-01T00:00:00Z", "buy": false, "price": 65500, "amount": 180, "trade_no": "sell_q1_25_1"}
+        ]
+    },
+    {
+        "interval": "30d_weekly",
+        "trades": [
+            {"timestamp": "2024-01-01T00:00:00Z", "buy": true, "price": 40000, "amount": 100, "trade_no": "buy_q1_1"},
+            {"timestamp": "2024-01-01T00:00:00Z", "buy": false, "price": 40500, "amount": 90, "trade_no": "sell_q1_1"},
+            {"timestamp": "2024-04-01T00:00:00Z", "buy": true, "price": 45000, "amount": 120, "trade_no": "buy_q2_1"},
+            {"timestamp": "2024-04-01T00:00:00Z", "buy": false, "price": 45500, "amount": 110, "trade_no": "sell_q2_1"},
+            {"timestamp": "2024-07-01T00:00:00Z", "buy": true, "price": 50000, "amount": 130, "trade_no": "buy_q3_1"},
+            {"timestamp": "2024-07-01T00:00:00Z", "buy": false, "price": 50500, "amount": 120, "trade_no": "sell_q3_1"},
+            {"timestamp": "2024-09-30T00:00:00Z", "buy": true, "price": 55000, "amount": 140, "trade_no": "buy_q4_1"},
+            {"timestamp": "2024-09-30T00:00:00Z", "buy": false, "price": 55500, "amount": 130, "trade_no": "sell_q4_1"},
+            {"timestamp": "2024-12-30T00:00:00Z", "buy": true, "price": 61575.8, "amount": 660, "trade_no": "buy_year_1:buy_year_4"},
+            {"timestamp": "2024-12-30T00:00:00Z", "buy": false, "price": 62080.6, "amount": 620, "trade_no": "sell_year_1:sell_year_4"},
+            {"timestamp": "2025-02-24T00:00:00Z", "buy": true, "price": 65000, "amount": 190, "trade_no": "buy_q1_25_1"},
+            {"timestamp": "2025-02-24T00:00:00Z", "buy": false, "price": 65500, "amount": 180, "trade_no": "sell_q1_25_1"}
+        ]
+    },
+    {
+        "interval": "90d",
+        "trades": [
+            {"timestamp": "2024-01-01T00:00:00Z", "buy": true, "price": 40000, "amount": 100, "trade_no": "buy_q1_1"},
+            {"timestamp": "2024-01-01T00:00:00Z", "buy": false, "price": 40500, "amount": 90, "trade_no": "sell_q1_1"},
+            {"timestamp": "2024-04-01T00:00:00Z", "buy": true, "price": 45000, "amount": 120, "trade_no": "buy_q2_1"},
+            {"timestamp": "2024-04-01T00:00:00Z", "buy": false, "price": 45500, "amount": 110, "trade_no": "sell_q2_1"},
+            {"timestamp": "2024-07-01T00:00:00Z", "buy": true, "price": 50000, "amount": 130, "trade_no": "buy_q3_1"},
+            {"timestamp": "2024-07-01T00:00:00Z", "buy": false, "price": 50500, "amount": 120, "trade_no": "sell_q3_1"},
+            {"timestamp": "2024-09-30T00:00:00Z", "buy": true, "price": 58800, "amount": 450, "trade_no": "buy_q4_1:buy_year_2"},
+            {"timestamp": "2024-09-30T00:00:00Z", "buy": false, "price": 59309.5, "amount": 420, "trade_no": "sell_q4_1:sell_year_2"},
+            {"timestamp": "2024-12-30T00:00:00Z", "buy": true, "price": 63388.9, "amount": 540, "trade_no": "buy_year_3:buy_q1_25_1"},
+            {"timestamp": "2024-12-30T00:00:00Z", "buy": false, "price": 63892.2, "amount": 510, "trade_no": "sell_year_3:sell_q1_25_1"}
+        ]
+    },
+    {
+        "interval": "365d",
+        "trades": [
+            {"timestamp": "2024-01-01T00:00:00Z", "buy": true, "price": 52950, "amount": 800, "trade_no": "buy_q1_1:buy_year_2"},
+            {"timestamp": "2024-01-01T00:00:00Z", "buy": false, "price": 53540.5, "amount": 740, "trade_no": "sell_q1_1:sell_year_2"},
+            {"timestamp": "2024-12-30T00:00:00Z", "buy": true, "price": 63388.9, "amount": 540, "trade_no": "buy_year_3:buy_q1_25_1"},
+            {"timestamp": "2024-12-30T00:00:00Z", "buy": false, "price": 63892.2, "amount": 510, "trade_no": "sell_year_3:sell_q1_25_1"}
+        ]
+    }
+]

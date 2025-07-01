@@ -1,0 +1,20 @@
+[
+    {"timestamp": "2024-01-01T00:00:00Z", "buy": true, "price": 40000, "amount": 100, "trade_no": "buy_q1_1"},
+    {"timestamp": "2024-01-01T01:00:00Z", "buy": false, "price": 40500, "amount": 90, "trade_no": "sell_q1_1"},
+    {"timestamp": "2024-04-01T00:00:00Z", "buy": true, "price": 45000, "amount": 120, "trade_no": "buy_q2_1"},
+    {"timestamp": "2024-04-01T01:00:00Z", "buy": false, "price": 45500, "amount": 110, "trade_no": "sell_q2_1"},
+    {"timestamp": "2024-07-01T00:00:00Z", "buy": true, "price": 50000, "amount": 130, "trade_no": "buy_q3_1"},
+    {"timestamp": "2024-07-01T01:00:00Z", "buy": false, "price": 50500, "amount": 120, "trade_no": "sell_q3_1"},
+    {"timestamp": "2024-10-01T00:00:00Z", "buy": true, "price": 55000, "amount": 140, "trade_no": "buy_q4_1"},
+    {"timestamp": "2024-10-01T01:00:00Z", "buy": false, "price": 55500, "amount": 130, "trade_no": "sell_q4_1"},
+    {"timestamp": "2024-12-31T23:00:00Z", "buy": true, "price": 60000, "amount": 150, "trade_no": "buy_year_1"},
+    {"timestamp": "2024-12-31T23:15:00Z", "buy": false, "price": 60500, "amount": 140, "trade_no": "sell_year_1"},
+    {"timestamp": "2024-12-31T23:30:00Z", "buy": true, "price": 61000, "amount": 160, "trade_no": "buy_year_2"},
+    {"timestamp": "2024-12-31T23:45:00Z", "buy": false, "price": 61500, "amount": 150, "trade_no": "sell_year_2"},
+    {"timestamp": "2025-01-01T00:00:00Z", "buy": true, "price": 62000, "amount": 170, "trade_no": "buy_year_3"},
+    {"timestamp": "2025-01-01T00:15:00Z", "buy": false, "price": 62500, "amount": 160, "trade_no": "sell_year_3"},
+    {"timestamp": "2025-01-01T00:30:00Z", "buy": true, "price": 63000, "amount": 180, "trade_no": "buy_year_4"},
+    {"timestamp": "2025-01-01T00:45:00Z", "buy": false, "price": 63500, "amount": 170, "trade_no": "sell_year_4"},
+    {"timestamp": "2025-03-01T00:00:00Z", "buy": true, "price": 65000, "amount": 190, "trade_no": "buy_q1_25_1"},
+    {"timestamp": "2025-03-01T01:00:00Z", "buy": false, "price": 65500, "amount": 180, "trade_no": "sell_q1_25_1"}
+]

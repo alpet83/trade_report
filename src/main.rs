@@ -1,17 +1,41 @@
-// /src/main.rs
-// Modified: 2025-06-25 16:26 EEST
-
-use axum::{Router, routing::get};
+use axum::{Router, routing::{get, post}, response::IntoResponse, extract::Query};
 use tokio::net::TcpListener;
-use tracing::{info, error, debug};
+use tokio::time::{sleep, Duration as TokioDuration};
+use tracing::{info, error, debug, warn};
 use tracing_subscriber::EnvFilter;
 use trade_report::{
-    api::{report, rtm, task}, // Added task
+    api::{report, rtm, task},
     config::Config,
     entities::account,
     db::mysql::MySqlDataSource,
     services::task_processor::TaskProcessor,
+    logs::app_error::AppError,
 };
+use std::collections::HashMap;
+
+async fn server_system(Query(params): Query<HashMap<String, String>>) -> Result<impl IntoResponse, AppError> {
+    let action = params
+        .get("action")
+        .ok_or_else(|| AppError::BadRequest("Missing action parameter".to_string()))?;
+
+    match action.as_str() {
+        "shutdown" => {
+            TaskProcessor::get().reset().await;
+            info!("#INFO: Server shutdown initiated, TaskProcessor reset");
+            tokio::spawn(async {
+                sleep(TokioDuration::from_millis(100)).await;
+                std::process::exit(0);
+            });
+            Ok("Server shutdown initiated")
+        }
+        "reset" => {
+            TaskProcessor::get().reset().await;
+            info!("#INFO: TaskProcessor forcefully reset for debugging");
+            Ok("TaskProcessor reset")
+        }
+        _ => Err(AppError::BadRequest(format!("Invalid action: {}", action))),
+    }
+}
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -28,7 +52,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Initialize MySQL pool
     debug!("Initializing MySQL pool");
-    let pool = MySqlDataSource::init_db_conn(&config.mysql.url)
+    let _pool = MySqlDataSource::init_db_conn(&config.mysql.url)
         .await
         .map_err(|e| format!("Failed to connect to MySQL: {}", e))?;
 
@@ -56,7 +80,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/", get(|| async { "Trade Report v0.3.0" }))
         .nest("/api", report::routes())
         .nest("/rtm", rtm::routes())
-        .nest("/task", task::routes()); // Added task routes
+        .nest("/task", task::routes())
+        .route("/system", get(server_system));
 
     // Start server
     debug!("Starting server on port {}", config.server.api_port);

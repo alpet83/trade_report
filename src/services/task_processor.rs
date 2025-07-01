@@ -1,10 +1,10 @@
 use chrono::{DateTime, Utc, Duration};
 use dashmap::DashMap;
 use once_cell::sync::OnceCell;
-use std::sync::{Arc, atomic::{AtomicU32, Ordering, AtomicBool}, Mutex};
+use std::{sync::{atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering}, Arc, Mutex}, thread::sleep as sync_sleep, time::Duration as TimeDuration};
 use tokio::sync::RwLock;
 use tokio::time::{sleep, Duration as TokioDuration};
-use tracing::{info, debug, warn, error};
+use tracing::{info, debug, warn};
 use serde_json::Value;
 
 use crate::{
@@ -13,7 +13,10 @@ use crate::{
 };
 
 // Default delay for polling tasks
-const DEFAULT_DELAY: TokioDuration = TokioDuration::from_millis(50); // Возвращено к 50 мс
+const DEFAULT_DELAY: TokioDuration = TokioDuration::from_millis(50);
+
+// Atomic counter for active threads
+static ACTIVE_THREADS: AtomicUsize = AtomicUsize::new(0);
 
 // Singleton instance for TaskProcessor
 static TASK_PROCESSOR: OnceCell<Arc<TaskProcessor>> = OnceCell::new();
@@ -40,9 +43,12 @@ struct ThreadGuard {
     cycle_count: u32,
 }
 
+
 impl Drop for ThreadGuard {
     fn drop(&mut self) {
-        warn!("#WARN: Thread {} terminated after {} cycles", self.thread_name, self.cycle_count);
+        ACTIVE_THREADS.fetch_sub(1, Ordering::Release);
+        debug!("#DBG: Thread {} dropped, active threads: {}", self.thread_name, ACTIVE_THREADS.load(Ordering::Acquire));
+        warn!("#WARN: !!!!!!!!!!!!!!!!!!!! Thread {} terminated after {} cycles !!!!!!!!!!!!!!!!!!!!!", self.thread_name, self.cycle_count);
     }
 }
 
@@ -54,7 +60,7 @@ pub struct TaskProcessor {
     failed_count: Arc<RwLock<u32>>,
     thread_handle: Arc<Mutex<Option<tokio::task::JoinHandle<()>>>>,
     is_spawning: Arc<AtomicBool>,
-    thread_active: Arc<AtomicBool>, // Добавлено
+    thread_active: Arc<AtomicBool>,    
 }
 
 impl TaskProcessor {
@@ -67,21 +73,40 @@ impl TaskProcessor {
     fn check_spawn_thread(&self, context: &str) {
         if self.thread_need_respawn() {
             if self.is_spawning.compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst).is_ok() {
-                let mut thread_handle = self.thread_handle.lock().unwrap();
-                debug!("#WARN: Need respawn thread: {:?} at {}", thread_handle, context);
+                                
+                debug!("#DBG: Need respawn thread at {}", context);
                 let aps = singleton_task_processor();
-                let handle = tokio::spawn(async move {
-                    aps.run_background_thread().await;
-                    warn!("#WARN: Background thread terminated");
-                });
-                info!("#INFO: Spawned new background thread, finished: {:?}", handle.is_finished());
-                *thread_handle = Some(handle);
-                self.thread_active.store(true, Ordering::SeqCst); // Устанавливаем thread_active=true
+
+                while ACTIVE_THREADS.load(Ordering::Acquire) > 0 {                   
+                    debug!("#DBG: Waiting for thread to finish at {}", context);
+                    sync_sleep(TimeDuration::from_millis(100));                    
+                }
+
+                Self::spawn_thread(aps);               
+                self.thread_active.store(true, Ordering::SeqCst); // prevent spawn additional threads
                 self.is_spawning.store(false, Ordering::SeqCst);
             } else {
-                debug!("#DBG: Skipped spawning thread: already spawning at {}", context);
+                debug!("#DBG: Skipped spawning: already in progress at {}", context);
             }
         }
+    }
+
+    fn spawn_thread(processor: Arc<Self>) {
+        let processor_clone = processor.clone();
+        let mut thread_handle = processor_clone.thread_handle.lock().unwrap();
+        let processor_clone = processor.clone();
+        ACTIVE_THREADS.fetch_add(1, Ordering::Release);
+        debug!("#DBG: Active threads: {}", ACTIVE_THREADS.load(Ordering::Acquire));
+        let handle = tokio::spawn({
+            let processor_clone = processor_clone.clone();
+            async move {
+                processor_clone.run_background_thread().await;
+                warn!("#WARN: Background thread terminated");
+            }
+        });
+        *thread_handle = Some(handle);        
+        sync_sleep(TimeDuration::from_millis(100)); // дождаться создания guard 
+        debug!("#DBG: Spawned thread: {:?}", thread_handle);
     }
 
     // Creates a new TaskProcessor instance and starts the background thread
@@ -93,17 +118,9 @@ impl TaskProcessor {
             failed_count: Arc::new(RwLock::new(0)),
             thread_handle: Arc::new(Mutex::new(None)),
             is_spawning: Arc::new(AtomicBool::new(false)),
-            thread_active: Arc::new(AtomicBool::new(true)), // Инициализируем как true
+            thread_active: Arc::new(AtomicBool::new(true)),
         });
-        let processor_clone = processor.clone();
-        let mut thread_handle = processor_clone.thread_handle.lock().unwrap();
-        let processor_clone = processor.clone();
-        let handle = tokio::spawn(async move {
-            processor_clone.run_background_thread().await;
-            warn!("#WARN: Background thread terminated");
-        });
-        *thread_handle = Some(handle);
-        debug!("#DBG: Spawned thread: {:?}", thread_handle);
+        Self::spawn_thread(processor.clone());
         info!("#INFO: Initialized TaskProcessor singleton");
         processor
     }
@@ -125,14 +142,14 @@ impl TaskProcessor {
     // Resets the TaskProcessor state for testing
     pub async fn reset(&self) {
         if !self.scheduled.is_empty() {
-            warn!("#WARN: Resetting TaskProcessor with {} tasks in scheduled queue", self.scheduled.len());
+            warn!("#WARN: Resetting with {} tasks in queue", self.scheduled.len());
         }
         self.scheduled.clear();
         let mut completed = self.completed.write().await;
         let removed_count = completed.len();
         for (_, task_scheduled) in completed.drain() {
             if let Err(e) = task_scheduled.task.write().await.release().await {
-                error!("Failed to release task during reset: {}", e);
+                warn!("#WARN: Failed to release task: {}", e);
             }
         }
         let mut failed_count = self.failed_count.write().await;
@@ -140,8 +157,9 @@ impl TaskProcessor {
         if let Some(counter) = TASK_ID_COUNTER.get() {
             counter.store(1, Ordering::SeqCst);
         }
-        self.thread_active.store(false, Ordering::SeqCst); // Сбрасываем thread_active
-        info!("#INFO: TaskProcessor state reset: {} tasks removed from completed", removed_count);
+        self.thread_active.store(false, Ordering::SeqCst);
+        debug!("#DBG: Thread active set to false");
+        info!("#INFO: TaskProcessor reset: {} tasks removed", removed_count);
     }
 
     // Returns the number of tasks still scheduled
@@ -150,31 +168,43 @@ impl TaskProcessor {
     }
 
     // Waits for all pending tasks to be processed
-    pub async fn wait_completed(&self) {
-        debug!("#SYNC: Waiting for {} pending tasks to complete", self.still_scheduled().await);
+    pub async fn wait_completed(&self) {        
+        let mut tasks = self.still_scheduled().await;    
+        if  0 == tasks { return; }
+        debug!("#DBG: Waiting for {} pending tasks", tasks);
         tokio::time::timeout(TokioDuration::from_secs(15), async {
-            while self.still_scheduled().await > 0 {
-                sleep(TokioDuration::from_millis(10)).await;
+            while tasks > 0 {
+                self.check_spawn_thread("::wait_completed");
+                sleep(TokioDuration::from_millis(30)).await;
+                tasks = self.still_scheduled().await;
             }
-        }).await.unwrap_or_else(|_| debug!("#SYNC_WARN: Timeout waiting for pending tasks"));
-        debug!("#SYNC: Finished waiting: {} pending tasks remain", self.still_scheduled().await);
+        }).await.unwrap_or_else(|_| warn!("#SYNC_WARN: Timeout waiting for tasks"));
+        
+        if tasks > 0 {
+            debug!("#DBG: Wait completed timeouted: {} tasks remain", tasks);
+        }
+        else {
+            info!("#INFO: All tasks completed");
+        }        
     }
 
     // Finds a task by ID in any queue
     pub async fn find_task(&self, task_id: u32) -> Option<SharedTask> {
-        debug!("#DBG: Fetching task with task_id={}", task_id);
+        debug!("#DBG: Fetching task id={}", task_id);
         for entry in self.scheduled.iter() {
             if entry.value().read().await.id() == task_id {
-                debug!("#DBG: Found task_id={} in scheduled queue", task_id);
+                debug!("#DBG: Found task id={} in scheduled", task_id);
                 return Some(entry.value().clone());
             }
         }
         let completed = self.completed.read().await;
-        for (_id, task_scheduled) in completed.iter() {                   
-            debug!("#DBG: Found task_id={} in completed queue", task_id);
-            return Some(task_scheduled.task.clone());            
+        for (id, task_scheduled) in completed.iter() {
+            if *id == task_id {
+                debug!("#DBG: Found task id={} in completed", task_id);
+                return Some(task_scheduled.task.clone());
+            }
         }
-        debug!("#DBG: Task_id={} not found in any queue", task_id);
+        debug!("#DBG: Task id={} not found", task_id);
         None
     }
 
@@ -195,15 +225,20 @@ impl TaskProcessor {
             tasks
         };
 
-        debug!("#DBG: Processing {} tasks in current cycle", tasks_to_run.len());
+        let tasks = tasks_to_run.len();
+        if tasks == 0 {
+            return;
+        }
+
+        debug!("#DBG: Processing {} tasks", tasks);
         for (at, task) in &tasks_to_run {
-            debug!("Executing task with at={}", at);
+            debug!("#DBG: Executing task at={}", at);
             let mut status = TaskStatus::Failed;
             let run_result = task.write().await.run().await;
             if let Ok(s) = run_result {
                 status = s;
             } else {
-                error!("#ERROR: Task execution failed: {:?}", run_result);
+                warn!("#ERROR: Task failed: {:?}", run_result);
             }
 
             match status {
@@ -217,46 +252,49 @@ impl TaskProcessor {
                             task: task.clone(),
                         },
                     );
-                    info!("Task {} completed, moved to completed queue (total: {})", task_id, completed.len());
+                    info!("#INFO: Task {} completed (total: {})", task_id, completed.len());
                 }
                 TaskStatus::Failed => {
                     let mut failed_count = self.failed_count.write().await;
                     *failed_count += 1;
                     if let Err(e) = task.write().await.release().await {
-                        error!("Failed to release task: {}", e);
+                        warn!("#WARN: Failed to release task: {}", e);
                     }
-                    info!("Task failed, released and discarded");
+                    info!("#INFO: Task failed and released");
                 }
                 TaskStatus::New | TaskStatus::Scheduled => {
                     let task_id = task.read().await.id();
                     let new_at = task.read().await.start_at();
                     self.scheduled.insert(new_at, task.clone());
-                    info!("Task {} rescheduled at {}", task_id, new_at);
+                    info!("#INFO: Task {} rescheduled at {}", task_id, new_at);
                 }
                 TaskStatus::Postponed => {
                     let task_id = task.read().await.id();
                     let new_at = Utc::now() + Duration::milliseconds(100);
                     task.write().await.set_start_at(new_at);
                     self.scheduled.insert(new_at, task.clone());
-                    info!("Task {} postponed, rescheduled at {}", task_id, new_at);
+                    info!("#INFO: Task {} postponed to {}", task_id, new_at);
                 }
             }
-            debug!("#DBG: Completed processing task at={}, {} tasks remaining in cycle", at, tasks_to_run.len() - (tasks_to_run.iter().position(|(t, _)| t == at).unwrap() + 1));
+            debug!("#DBG: Processed task at={}", at);
         }
 
         let scheduled_len = self.still_scheduled().await;
-        debug!("#DBG: End of loop: {} tasks in scheduled", scheduled_len);
+        debug!("#DBG: End of loop: {} tasks pending", scheduled_len);
     }
 
     // Runs the background thread to process tasks
     async fn run_background_thread(&self) {
-        info!("#INFO: >>>>>>>>>> Starting TaskProcessor background thread <<<<<<<<<<<<");
-        let mut guard = ThreadGuard { thread_name: "TaskProcessor".to_string(), cycle_count: 0 };
+        // let mut thread_handle = self.thread_handle.lock().unwrap();
+        let thread_id = std::thread::current().id();
+        info!("----------------------------------------------------------------------------------------------");
+        info!("#INFO: >>>>>>>>>>>>>>>>>>>> Starting TaskProcessor thread:{:?} <<<<<<<<<<<<<<<<<<<", thread_id);
+        let mut guard = ThreadGuard { thread_name: format!("TaskProcessor:{:?}", thread_id), cycle_count: 0 };
         loop {
             self.process().await;
             guard.cycle_count += 1;
             if self.scheduled.is_empty() && !self.thread_active.load(Ordering::SeqCst) {
-                debug!("#DBG: No tasks in scheduled queue and thread_active=false, pausing background thread");
+                debug!("#DBG: No tasks and thread inactive, pausing thread:{}", guard.thread_name);
                 break;
             }
             sleep(DEFAULT_DELAY).await;
@@ -265,7 +303,7 @@ impl TaskProcessor {
 
     // Adds a task to the scheduled queue
     pub async fn add(&self, task: Box<dyn Task + 'static>) -> Result<u32, String> {
-        debug!("Adding task to TaskProcessor");
+        debug!("#DBG: Adding task");
         let task_arc = Arc::new(RwLock::new(task));
         let mut task_write = task_arc.write().await;
         task_write.init().await?;
@@ -280,7 +318,8 @@ impl TaskProcessor {
         drop(task_write);
 
         self.replay_at(at, task_arc.clone(), task_id).await?;
-        info!("Task {} scheduled at {}", task_id, at);
+        info!("#INFO: Task {} scheduled at {}", task_id, at);
+        self.check_spawn_thread("::add");
         Ok(task_id)
     }
 
@@ -301,10 +340,10 @@ impl TaskProcessor {
         let mut completed = self.completed.write().await;
         if let Some(task_scheduled) = completed.remove(&task_id) {
             task_scheduled.task.write().await.release().await?;
-            info!("Task {} removed from completed queue", task_id);
+            info!("#INFO: Task {} removed", task_id);
             Ok(())
         } else {
-            Err(format!("Task with id={} not found", task_id))
+            Err(format!("Task id={} not found", task_id))
         }
     }
 
@@ -325,16 +364,16 @@ impl TaskProcessor {
 
     // Retrieves the result of a completed task by ID
     pub async fn get_results(&self, id: u32) -> Result<Value, AppError> {
-        debug!("Fetching result for task_id={}", id);
+        debug!("#DBG: Fetching result for task id={}", id);
         let task = self
             .find_completed(id)
             .await
-            .ok_or_else(|| AppError::NotFound(format!("Task with id={} not found", id)))?;
+            .ok_or_else(|| AppError::NotFound(format!("Task id={} not found", id)))?;
 
         let task_read = task.read().await;
         let strong_count = Arc::strong_count(&task);
         let task_result = task_read.result();
-        debug!("Retrieved result for task_id={} (strong_count={}): {:?}", id, strong_count, task_result);
+        debug!("#DBG: Got result for task id={} (refs={})", id, strong_count);
         Ok(task_result)
     }
 
@@ -345,7 +384,7 @@ impl TaskProcessor {
         let failed_count = *self.failed_count.read().await;
         let pending_count = self.still_scheduled().await;
         info!(
-            "#STATUS: TaskProcessor status: {} completed, {} failed, {} pending",
+            "#STATUS: TaskProcessor: {} completed, {} failed, {} pending",
             completed_count, failed_count, pending_count
         );
     }

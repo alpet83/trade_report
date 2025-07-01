@@ -1,8 +1,8 @@
 // /src/tests/trades_cache.rs
-// Modified: 2025-06-24 10:41:00 EEST
+// Modified: 2025-06-30 14:30:00 EEST
 
 use chrono::{DateTime, Utc, Duration};
-use rand::{rng, Rng};
+use rand::{rngs::ThreadRng, Rng};
 use std::fs::File;
 use std::io::Write;
 use std::sync::Arc;
@@ -43,18 +43,33 @@ fn test_trades_cache_import_and_get() {
     // Create TradesCache
     let cache = TradesCache::new(account, 1);
 
-    // Generate test_trades.csv with 10 random trades
-    let mut rng = rng();
+    // Generate test_trades.csv with 10 trades in different timestamp formats
+    let mut rng = rand::thread_rng();
     let base_ts = Utc::now();
     let mut trades = Vec::new();
-    let mut csv_content = String::new();
+    let mut csv_content = String::from("ts,buy,price,amount,trade_no\n");
+
+    let timestamp_formats = [
+        "%Y-%m-%dT%H:%M:%SZ",           // 2024-12-01T00:00:00Z
+        "%Y-%m-%d %H:%M:%S",            // 2024-12-01 00:00:00
+        "%Y-%m-%dT%H:%M:%S%.3f+00:00",  // 2024-12-01T00:00:00.000+00:00
+        "%Y-%m-%d %H:%M:%S%.3f+00:00",  // 2024-12-01 00:00:00.000+00:00
+    ];
 
     for i in 1..=10 {
-        let ts = base_ts + Duration::minutes(rng.random_range(0..1440));
-        let buy = rng.random_bool(0.5);
-        let price = rng.random_range(0.01..100000.0);
-        let amount = rng.random_range(0.1..10000.0);
+        let ts = base_ts + Duration::minutes(rng.gen_range(0..1440));
+        let buy = rng.gen_bool(0.5);
+        let price = rng.gen_range(0.01..100000.0);
+        let amount = rng.gen_range(0.1..10000.0);
         let trade_no = format!("trade_{}", i);
+
+        // Randomly select a timestamp format
+        let format_idx = rng.gen_range(0..timestamp_formats.len());
+        let ts_str = ts.format(timestamp_formats[format_idx]).to_string();
+        csv_content.push_str(&format!(
+            "{},{},{},{},{}\n",
+            ts_str, buy, price, amount, trade_no
+        ));
 
         trades.push(Trade {
             ts,
@@ -69,15 +84,6 @@ fn test_trades_cache_import_and_get() {
             flags: 0,
             comission: 0.0,
         });
-
-        csv_content.push_str(&format!(
-            "{},{},{},{},{}\n",
-            ts.to_rfc3339(),
-            buy,
-            price,
-            amount,
-            trade_no
-        ));
     }
 
     // Write CSV file
@@ -105,5 +111,5 @@ fn test_trades_cache_import_and_get() {
         assert_eq!(retrieved.trade_no, trade.trade_no, "Trade_no mismatch for {}", trade.trade_no);
     }
 
-    debug!("Successfully tested TradesCache import and get_trade");
+    debug!("Successfully tested TradesCache import and get_trade with multiple timestamp formats");
 }

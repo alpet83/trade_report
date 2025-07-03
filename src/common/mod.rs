@@ -4,4 +4,5 @@
 pub mod time;
 pub mod consts;
 pub mod math;
+pub mod basic_logger;
 pub mod interval_func;

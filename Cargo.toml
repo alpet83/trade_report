@@ -30,6 +30,9 @@ rand = "0.9.1"
 tower = "0.5.2"
 hyper = "1.6.0"
 futures = "0.3.31"
+ansi_term = "0.12.1"
+regex = "1.11.1"
+glob = "0.3.2"
 
 [dev-dependencies]
 sqlx = { version = "0.7", features = ["runtime-tokio-rustls", "mysql", "chrono"] }

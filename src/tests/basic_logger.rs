@@ -3,16 +3,18 @@ use crate::tests::setup::init_test_environment;
 use std::fs;
 use std::path::Path;
 use tokio::sync::Mutex;
-use tokio::time::{sleep, Duration as TokioDuration};
+use tokio::time::{sleep, Duration as TokioDuration, timeout};
 use tracing::metadata::LevelFilter;
 use tracing_subscriber::EnvFilter;
 use regex::Regex;
+use tracing::debug;
 
 // Global mutex for test synchronization
 static TEST_LOCK: Mutex<()> = Mutex::const_new(());
 
-fn init_tracing() {
-    init_test_environment();
+async fn init_tracing() {
+    debug!("#DBG: Starting init_tracing");
+    init_test_environment().await;
     let _ = tracing_subscriber::fmt()
         .with_env_filter(
             EnvFilter::builder()
@@ -20,6 +22,7 @@ fn init_tracing() {
                 .from_env_lossy(),
         )
         .try_init();
+    debug!("#DBG: Finished init_tracing");
 }
 
 fn get_log_prefix() -> String {
@@ -39,6 +42,7 @@ fn strip_ansi(content: &str) -> String {
 }
 
 async fn list_log_dir(log_dir: &str) {
+    debug!("#DBG: Listing contents of log directory {}", log_dir);
     let mut files = Vec::new();
     if let Ok(entries) = fs::read_dir(log_dir) {
         for entry in entries.filter_map(Result::ok) {
@@ -57,14 +61,20 @@ async fn list_log_dir(log_dir: &str) {
         }
     }
     logger::debug(&format!("#DBG: Contents of {}: {:?}", log_dir, files)).expect("Failed to log debug");
+    debug!("#DBG: Finished listing log directory {}", log_dir);
 }
 
 #[tokio::test]
 async fn test_basic_logger_multithread() {
-    init_tracing();
-    let _guard = TEST_LOCK.lock().await;
+    debug!("#DBG: Acquiring TEST_LOCK for test_basic_logger_multithread");
+    let _guard = timeout(TokioDuration::from_secs(60), TEST_LOCK.lock())
+        .await
+        .expect("Timeout waiting for TEST_LOCK");
+    debug!("#DBG: Acquired TEST_LOCK for test_basic_logger_multithread");
 
-    let log_dir = "logs";
+    init_tracing().await;
+
+    let log_dir = "test-logs";
     fs::create_dir_all(log_dir).expect("Failed to create test log directory");
     logger::debug(&format!("#DBG: Created log directory {}", log_dir)).expect("Failed to log debug");
 
@@ -95,6 +105,12 @@ async fn test_basic_logger_multithread() {
     let thread_ids = logger::get_ids();
     logger::debug(&format!("#DBG: Retrieved thread IDs: {:?}", thread_ids))
         .expect("Failed to log debug");
+
+    let mut all_info_found = vec![false; 3];
+    let mut all_warn_found = vec![false; 3];
+    let mut all_debug_found = vec![false; 3];
+    let mut all_error_found = vec![false; 3];
+
     for thread_id in thread_ids.iter() {
         let log_file = format!("{}/{}{}.log", log_dir, get_log_prefix(), thread_id);
         logger::debug(&format!("#DBG: Checking log file {}", log_file))
@@ -105,61 +121,62 @@ async fn test_basic_logger_multithread() {
         logger::debug(&format!("#DBG: Log file {} contents:\n{}", log_file, clean_content))
             .expect("Failed to log debug");
 
-        let mut found_info = false;
-        let mut found_warn = false;
-        let mut found_debug = false;
-        let mut found_error = false;
         for i in 0..3 {
             if clean_content.contains(&format!(" [INFO] Thread {} info message", i)) {
-                found_info = true;
+                all_info_found[i] = true;
             }
             if clean_content.contains(&format!(" [WARN] Thread {} warning message", i)) {
-                found_warn = true;
+                all_warn_found[i] = true;
             }
             if clean_content.contains(&format!(" [DEBUG] Thread {} debug message", i)) {
-                found_debug = true;
+                all_debug_found[i] = true;
             }
             if clean_content.contains(&format!(" [ERROR] Thread {} error message\nBacktrace:", i)) {
-                found_error = true;
+                all_error_found[i] = true;
             }
         }
+    }
+
+    for i in 0..3 {
         assert!(
-            found_info,
-            "Expected '[INFO] Thread X info message' for X in [0..3) in {}, got:\n{}",
-            log_file,
-            clean_content
+            all_info_found[i],
+            "Expected '[INFO] Thread {} info message' in some log file",
+            i
         );
         assert!(
-            found_warn,
-            "Expected '[WARN] Thread X warning message' for X in [0..3) in {}, got:\n{}",
-            log_file,
-            clean_content
+            all_warn_found[i],
+            "Expected '[WARN] Thread {} warning message' in some log file",
+            i
         );
         assert!(
-            found_debug,
-            "Expected '[DEBUG] Thread X debug message' for X in [0..3) in {}, got:\n{}",
-            log_file,
-            clean_content
+            all_debug_found[i],
+            "Expected '[DEBUG] Thread {} debug message' in some log file",
+            i
         );
         assert!(
-            found_error,
-            "Expected '[ERROR] Thread X error message' for X in [0..3) in {}, got:\n{}",
-            log_file,
-            clean_content
+            all_error_found[i],
+            "Expected '[ERROR] Thread {} error message' in some log file",
+            i
         );
     }
 
     list_log_dir(log_dir).await;
     logger::debug("#DBG: test_basic_logger_multithread: OK")
         .expect("Failed to log debug");
+    debug!("#DBG: Releasing TEST_LOCK for test_basic_logger_multithread");
 }
 
 #[tokio::test]
 async fn test_basic_logger_rotation() {
-    init_tracing();
-    let _guard = TEST_LOCK.lock().await;
+    debug!("#DBG: Acquiring TEST_LOCK for test_basic_logger_rotation");
+    let _guard = timeout(TokioDuration::from_secs(60), TEST_LOCK.lock())
+        .await
+        .expect("Timeout waiting for TEST_LOCK");
+    debug!("#DBG: Acquired TEST_LOCK for test_basic_logger_rotation");
 
-    let log_dir = "logs";
+    init_tracing().await;
+
+    let log_dir = "test-logs";
     fs::create_dir_all(log_dir).expect("Failed to create test log directory");
     logger::debug(&format!("#DBG: Created log directory {}", log_dir))
         .expect("Failed to log debug");
@@ -196,7 +213,7 @@ async fn test_basic_logger_rotation() {
     let rotated_file_pattern = format!("{}/{}{}_*.log", log_dir, get_log_prefix(), thread_id);
     logger::debug(&format!("#DBG: Checking rotated files with pattern {}", rotated_file_pattern))
         .expect("Failed to log debug");
-    let rotated_files: Vec<_> = tokio::time::timeout(
+    let rotated_files: Vec<_> = timeout(
         TokioDuration::from_secs(5),
         async {
             glob::glob(&rotated_file_pattern)
@@ -229,4 +246,5 @@ async fn test_basic_logger_rotation() {
     list_log_dir(log_dir).await;
     logger::debug("#DBG: test_basic_logger_rotation: OK")
         .expect("Failed to log debug");
+    debug!("#DBG: Releasing TEST_LOCK for test_basic_logger_rotation");
 }
